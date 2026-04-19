@@ -69,10 +69,9 @@ dataset:
   split: train
 
 # packed_sequence_size=0: packing is done inside StreamingPackedDataset
-# pre_packed=true: tells build_model to enable packed-sequence attention (THD)
+# pre_packed not needed: Gemma4 forward accepts **kwargs, so seq_lens/qkv_format pass through
 packed_sequence:
   packed_sequence_size: 0
-  pre_packed: true
 
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader

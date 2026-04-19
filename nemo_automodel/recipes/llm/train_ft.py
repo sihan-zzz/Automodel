@@ -1029,8 +1029,7 @@ class TrainFinetuneRecipeForNextTokenPrediction(BaseRecipe):
         model = build_model(
             self.cfg.model,
             self.peft_config,
-            has_packed_sequence=self.cfg.get("packed_sequence.packed_sequence_size", 0) > 0
-            or self.cfg.get("packed_sequence.pre_packed", False),
+            has_packed_sequence=self.cfg.get("packed_sequence.packed_sequence_size", 0) > 0,
             seed=self.cfg.get("seed", 42),
             cfg_fp8=self.cfg.get("fp8", None),
             cfg_compile=self.cfg.get("compile", None),
