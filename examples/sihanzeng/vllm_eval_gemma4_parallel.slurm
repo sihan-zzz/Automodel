@@ -65,7 +65,7 @@ echo 'Starting: $TASK (thinking mode, vLLM DP=8, max_gen_toks=8192)'
 
 # No --apply_chat_template or --gen_kwargs: handled in task YAML
 python3 $LAUNCHER --model vllm \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=16384,enforce_eager=True \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enforce_eager=True \
     --tasks $TASK \
     --batch_size 64 \
     --num_fewshot 0 \

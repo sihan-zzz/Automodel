@@ -16,7 +16,7 @@ generation_kwargs:
   top_k: 64
   top_p: 0.95
   do_sample: true
-  max_gen_toks: 16384
+  max_gen_toks: 24576
 filter_list:
   - name: thinking_flex
     filter:
