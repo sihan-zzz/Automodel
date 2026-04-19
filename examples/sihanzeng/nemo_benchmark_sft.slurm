@@ -3,7 +3,7 @@
 #SBATCH --account=ads_cpt
 #SBATCH --partition=a4
 #SBATCH --qos=ads_cpt
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=2000G
