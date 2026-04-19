@@ -1,11 +1,11 @@
 # Gemma4 26B-A4B-it MoE SFT — 4 nodes (32 GPUs)
 # EP=8 within each node, FSDP across 4 nodes (ep_shard_size=4)
-# GBS=16 with grad_accum=2 (vs 8 on 1 node) → 4x faster wall time
+# dp_size=32, GBS=64, local_bs=2 → grad_accum=1, 4x throughput vs 1-node
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
 step_scheduler:
-  global_batch_size: 16
+  global_batch_size: 64
   local_batch_size: 2
   ckpt_every_steps: 500
   val_every_steps: 500
