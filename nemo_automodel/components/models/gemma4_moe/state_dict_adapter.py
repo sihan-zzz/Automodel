@@ -225,18 +225,21 @@ class Gemma4MoEStateDictAdapter(StateDictAdapter):
                 return tensor.to_local()
             return tensor
 
+        # DTensor.shape returns global shape; use it for correct allocation
+        # when experts are sharded across EP_SHARD (multi-node).
         global_tensor = torch.zeros(
-            (
-                n_experts,
-                tensor.shape[1] if not state_dict_utils.is_dtensor(tensor) else tensor.to_local().shape[1],
-                tensor.shape[2] if not state_dict_utils.is_dtensor(tensor) else tensor.to_local().shape[2],
-            ),
+            (n_experts, tensor.shape[1], tensor.shape[2]),
             dtype=self.dtype,
             device="cpu",
         )
 
         if state_dict_utils.is_dtensor(tensor):
             split_weights, expert_ids = state_dict_utils.split_experts_weights_dtensor_aware(tensor, n_experts)
+            # Convert remaining DTensors to regular tensors (EP_SHARD case)
+            split_weights = [
+                w.full_tensor().to(self.dtype).cpu() if state_dict_utils.is_dtensor(w) else w.to(self.dtype).cpu()
+                for w in split_weights
+            ]
         else:
             start_expert, end_expert = state_dict_utils.get_expert_range_for_rank_from_mesh(device_mesh, n_experts)
             split_weights = [tensor[i].to(self.dtype).cpu() for i in range(tensor.shape[0])]
@@ -250,18 +253,18 @@ class Gemma4MoEStateDictAdapter(StateDictAdapter):
                 ep_group = None
 
             if ep_group is not None:
-                payload = (expert_ids, [w.cpu() for w in split_weights])
+                payload = (expert_ids, split_weights)
                 gathered: list[tuple[list[int], list[torch.Tensor]]] = [None] * dist.get_world_size(ep_group)
                 dist.all_gather_object(gathered, payload, group=ep_group)
                 for ids, weights in gathered:
                     for eid, w in zip(ids, weights):
-                        global_tensor[eid].copy_(w.to(self.dtype).cpu())
+                        global_tensor[eid].copy_(w.to(self.dtype))
             else:
                 for weight, expert_id in zip(split_weights, expert_ids):
-                    global_tensor[expert_id].copy_(weight.to(self.dtype).cpu())
+                    global_tensor[expert_id].copy_(weight.to(self.dtype))
         else:
             for weight, expert_id in zip(split_weights, expert_ids):
-                global_tensor[expert_id].copy_(weight.to(self.dtype).cpu())
+                global_tensor[expert_id].copy_(weight.to(self.dtype))
 
         del split_weights, expert_ids
         return global_tensor
