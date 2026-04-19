@@ -67,7 +67,7 @@ python3 -c 'import lm_eval; print(f\"lm-eval {lm_eval.__version__}\")' 2>&1
 echo ''
 echo 'Starting: $TASK (vLLM TP=8)'
 python3 $LAUNCHER --model vllm \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=8,gpu_memory_utilization=0.95,max_model_len=8192,enforce_eager=True \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=8192,enforce_eager=True \
     --tasks $TASK \
     --batch_size 256 \
     --apply_chat_template \
