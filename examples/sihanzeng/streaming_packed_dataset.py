@@ -189,18 +189,16 @@ class StreamingPackedDataset(IterableDataset):
             last_pos = buf_pos[-1] if buf_pos else 0
             buf_pos = buf_pos + list(range(last_pos + 1, last_pos + 1 + pad_len))
 
-        seq_lens = torch.tensor(buf_seq_lens, dtype=torch.long)
-        seq_lens_padded = seq_lens.clone()
+        seq_lens_padded = list(buf_seq_lens)
         if pad_len > 0:
             seq_lens_padded[-1] = seq_lens_padded[-1] + pad_len
 
         return {
-            "input_ids": torch.tensor(buf_ids, dtype=torch.long),
-            "labels": torch.tensor(buf_labels, dtype=torch.long),
-            "position_ids": torch.tensor(buf_pos, dtype=torch.long),
-            "seq_lens": seq_lens,
+            "input_ids": buf_ids,
+            "labels": buf_labels,
+            "position_ids": buf_pos,
+            "seq_lens": list(buf_seq_lens),
             "seq_lens_padded": seq_lens_padded,
-            # mm_token_type_ids added by packed_thd_collater_with_mm
         }
 
     def __iter__(self):

@@ -13,7 +13,7 @@
 #SBATCH --output=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/logs/nemo_am_blend_%j.log
 
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo-20260401.sqsh
-AUTOMODEL_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/Automodel
+AUTOMODEL_DIR=$HOME/Automodel
 SCRIPTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/scripts
 CONFIG=$AUTOMODEL_DIR/examples/sihanzeng/gemma4_26b_sft_packed.yaml
 
