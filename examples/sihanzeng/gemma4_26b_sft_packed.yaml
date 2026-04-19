@@ -1,0 +1,90 @@
+# Gemma4 26B-A4B-it MoE SFT — streaming packed blended datasets
+# Tulu3 (0.8) + Step 3.5 Flash (0.2) with online packing to 8k windows
+# amaia-style: no offline packing pass, no upfront data loading
+
+recipe: TrainFinetuneRecipeForNextTokenPrediction
+
+step_scheduler:
+  global_batch_size: 16
+  local_batch_size: 2
+  ckpt_every_steps: 500
+  val_every_steps: 500
+  num_epochs: 1
+  max_steps: 200
+
+dist_env:
+  backend: nccl
+  timeout_minutes: 30
+
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 42
+  ranked: true
+
+model:
+  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
+  torch_dtype: bfloat16
+  trust_remote_code: true
+  backend:
+    _target_: nemo_automodel.components.models.common.BackendConfig
+    attn: te
+    linear: te
+    rms_norm: te
+    rope_fusion: true
+    experts: torch_mm
+    dispatcher: deepep
+    fake_balanced_gate: false
+    enable_hf_state_dict_adapter: true
+    enable_fsdp_optimizations: true
+
+checkpoint:
+  enabled: true
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_it_packed/
+  model_save_format: safetensors
+  save_consolidated: true
+
+distributed:
+  strategy: fsdp2
+  tp_size: 1
+  cp_size: 1
+  pp_size: 1
+  ep_size: 8
+  sequence_parallel: false
+  activation_checkpointing: true
+
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+
+dataset:
+  _target_: streaming_packed_dataset.StreamingPackedDataset
+  sources:
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
+      weight: 0.8
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/step_3p5_flash_sft
+      weight: 0.2
+  seq_length: 8192
+  packed_sequence_size: 8192
+  shuffle_buffer_size: 64
+  split: train
+
+# packed_sequence_size=0: packing is done inside StreamingPackedDataset
+# pre_packed=true: tells build_model to enable packed-sequence attention (THD)
+packed_sequence:
+  packed_sequence_size: 0
+  pre_packed: true
+
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: streaming_packed_dataset.packed_thd_collater_with_mm
+  batch_size: 2
+  num_workers: 4
+  prefetch_factor: 10
+  pin_memory: true
+  persistent_workers: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 2e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
