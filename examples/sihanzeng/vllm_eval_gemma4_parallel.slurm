@@ -69,7 +69,7 @@ echo 'Starting: $TASK (data parallel, 8 GPUs)'
 # ~8x throughput vs model parallelism
 accelerate launch --num_processes 8 --num_machines 1 \
     -m lm_eval --model hf \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,max_length=8192 \
     --tasks $TASK \
     --batch_size auto \
     --apply_chat_template \
