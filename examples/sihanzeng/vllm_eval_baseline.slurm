@@ -31,10 +31,11 @@ srun --container-image=$CONTAINER \
      --container-env=FLASHINFER_WORKSPACE_DIR,HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED \
      --container-mount-home \
      bash -c "
-pip install lm-eval -q 2>&1 | tail -1
+pip install --target=/tmp/lm_eval_pkg lm-eval 2>&1 | tail -3
+export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
 echo 'Running MMLU...'
-lm_eval --model hf \
+python3 -m lm_eval --model hf \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
     --tasks mmlu \
     --batch_size 4 \
@@ -43,7 +44,7 @@ lm_eval --model hf \
 
 echo ''
 echo 'Running IFEval...'
-lm_eval --model hf \
+python3 -m lm_eval --model hf \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
     --tasks ifeval \
     --batch_size 1 \
@@ -52,7 +53,7 @@ lm_eval --model hf \
 
 echo ''
 echo 'Running GPQA Diamond...'
-lm_eval --model hf \
+python3 -m lm_eval --model hf \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
     --tasks gpqa_diamond_zeroshot \
     --batch_size 4 \
