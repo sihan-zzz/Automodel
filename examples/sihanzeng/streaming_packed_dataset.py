@@ -5,6 +5,7 @@ amaia-style zero-latency data pipeline:
 - Packs multiple tokenized conversations into fixed-length windows on-the-fly
 - Reservoir shuffle for approximate randomization with bounded memory
 - Outputs THD-format packed samples compatible with packed_sequence_thd_collater
+- Loss masking: only assistant turns contribute to loss (user/system masked to -100)
 
 No upfront data loading. No offline packing pass. Near-zero startup latency.
 """
@@ -91,10 +92,13 @@ class StreamingPackedDataset(IterableDataset):
         )
 
     def _convert_and_tokenize(self, sample):
-        """Convert dialog format to messages and tokenize. Returns (input_ids, labels) or None."""
+        """Convert dialog to (input_ids, labels) with assistant-only loss masking."""
         dialog = sample.get("dialog", sample.get("conversations", []))
+        keep_loss = sample.get("keep_loss", None)
+
         messages = []
-        for turn in dialog:
+        roles = []
+        for i, turn in enumerate(dialog):
             if isinstance(turn, dict):
                 role = turn.get("source", turn.get("role", turn.get("from", "user")))
                 content = turn.get("body", turn.get("content", turn.get("value", "")))
@@ -105,75 +109,95 @@ class StreamingPackedDataset(IterableDataset):
                 role = role_map.get(role, role.lower())
                 if role in ("user", "assistant", "system") and content:
                     messages.append({"role": role, "content": content})
+                    if keep_loss is not None and i < len(keep_loss):
+                        roles.append("assistant" if keep_loss[i] else role)
+                    else:
+                        roles.append(role)
 
         if len(messages) < 2:
             return None
 
         try:
-            text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False,
-            )
-            encoded = self.tokenizer(
-                text, truncation=True, max_length=self.seq_length,
-                padding=False, return_tensors=None,
-            )
-            input_ids = encoded["input_ids"]
+            # Tokenize each turn incrementally to find token boundaries
+            input_ids = []
+            labels = []
+            for i in range(len(messages)):
+                prefix = self.tokenizer.apply_chat_template(
+                    messages[:i], tokenize=False, add_generation_prompt=False,
+                ) if i > 0 else ""
+                full = self.tokenizer.apply_chat_template(
+                    messages[:i + 1], tokenize=False, add_generation_prompt=False,
+                )
+
+                prefix_ids = self.tokenizer(
+                    prefix, truncation=False, padding=False, return_tensors=None,
+                )["input_ids"] if prefix else []
+                full_ids = self.tokenizer(
+                    full, truncation=False, padding=False, return_tensors=None,
+                )["input_ids"]
+
+                turn_ids = full_ids[len(prefix_ids):]
+
+                if roles[i] == "assistant":
+                    turn_labels = list(turn_ids)
+                else:
+                    turn_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(turn_ids)
+
+                input_ids.extend(turn_ids)
+                labels.extend(turn_labels)
+
+            if len(input_ids) > self.seq_length:
+                input_ids = input_ids[:self.seq_length]
+                labels = labels[:self.seq_length]
+
             if len(input_ids) < 2:
                 return None
-            return input_ids
+
+            return input_ids, labels
         except Exception:
             return None
 
     def _tokenized_stream(self):
-        """Yields tokenized sequences (list[int]) from the blended source."""
+        """Yields (input_ids, labels) tuples from the blended source."""
         for sample in self.blended:
-            input_ids = self._convert_and_tokenize(sample)
-            if input_ids is not None:
-                yield input_ids
+            result = self._convert_and_tokenize(sample)
+            if result is not None:
+                yield result
 
     def _packing_stream(self):
-        """Online sequence packer. Yields fixed-size packed samples (THD format).
-
-        Greedy bin-packing: fills a buffer until pack_size, then emits.
-        Sequences that don't fit are split at the boundary (no wrapping across
-        document boundaries for SFT — the remainder starts fresh in the next pack).
-        """
+        """Online sequence packer. Yields fixed-size packed samples (THD format)."""
         pack_size = self.pack_size
         pad_id = getattr(self.tokenizer, "pad_token_id", None) or 0
 
-        # Current pack state
         buf_ids: list[int] = []
         buf_labels: list[int] = []
         buf_pos: list[int] = []
         buf_seq_lens: list[int] = []
-        cur_pos = 0
 
-        for input_ids in self._tokenized_stream():
+        for input_ids, labels in self._tokenized_stream():
             seq_len = len(input_ids)
 
             if seq_len > pack_size:
                 input_ids = input_ids[:pack_size]
+                labels = labels[:pack_size]
                 seq_len = pack_size
 
             space_left = pack_size - len(buf_ids)
 
             if seq_len <= space_left:
                 buf_ids.extend(input_ids)
-                buf_labels.extend(input_ids)
+                buf_labels.extend(labels)
                 buf_pos.extend(range(seq_len))
                 buf_seq_lens.append(seq_len)
             else:
-                # Emit current pack (pad the remaining space)
                 if buf_ids:
                     yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
 
-                # Start fresh pack with this sequence
                 buf_ids = list(input_ids)
-                buf_labels = list(input_ids)
+                buf_labels = list(labels)
                 buf_pos = list(range(seq_len))
                 buf_seq_lens = [seq_len]
 
-        # Emit final partial pack
         if buf_ids and not self.drop_last:
             yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
 
@@ -209,7 +233,6 @@ class StreamingPackedDataset(IterableDataset):
             yield from packing_iter
             return
 
-        # Reservoir shuffle over packed samples
         rng = random.Random(self.seed)
         buffer = []
 
