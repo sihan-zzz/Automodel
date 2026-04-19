@@ -50,6 +50,12 @@ srun --container-image=$CONTAINER \
      --container-env=HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED \
      --container-mount-home \
      bash -c "
+export WORLD_SIZE=1
+export RANK=0
+export LOCAL_RANK=0
+export MASTER_ADDR=localhost
+export MASTER_PORT=29500
+
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 
 pip install --target=/tmp/lm_eval_pkg lm-eval 2>&1 | tail -5
