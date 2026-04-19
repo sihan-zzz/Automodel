@@ -53,9 +53,11 @@ srun --container-image=$CONTAINER \
      bash -c "
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 
-pip install --target=/tmp/lm_eval_pkg lm-eval 2>&1 | tail -5
+# Downgrade transformers to match vLLM 0.10.1 requirement (container has 5.5.0, needs 4.55.2)
+pip install --target=/tmp/lm_eval_pkg lm-eval transformers==4.55.2 2>&1 | tail -5
 export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
+python3 -c 'import transformers; print(f\"transformers {transformers.__version__}\")' 2>&1
 python3 -c 'import vllm; print(f\"vLLM {vllm.__version__}\")' 2>&1
 python3 -c 'import lm_eval; print(f\"lm-eval {lm_eval.__version__}\")' 2>&1
 
