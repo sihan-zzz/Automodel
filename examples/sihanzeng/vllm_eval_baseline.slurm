@@ -31,12 +31,13 @@ srun --container-image=$CONTAINER \
      --container-env=FLASHINFER_WORKSPACE_DIR,HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED \
      --container-mount-home \
      bash -c "
+export CUDA_VISIBLE_DEVICES=0
 pip install --target=/tmp/lm_eval_pkg lm-eval 2>&1 | tail -3
 export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
 echo 'Running MMLU...'
 python3 -m lm_eval --model hf \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager \
     --tasks mmlu \
     --batch_size 4 \
     --limit 100 \
@@ -45,7 +46,7 @@ python3 -m lm_eval --model hf \
 echo ''
 echo 'Running IFEval...'
 python3 -m lm_eval --model hf \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager \
     --tasks ifeval \
     --batch_size 1 \
     --limit 50 \
@@ -54,7 +55,7 @@ python3 -m lm_eval --model hf \
 echo ''
 echo 'Running GPQA Diamond...'
 python3 -m lm_eval --model hf \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager \
     --tasks gpqa_diamond_zeroshot \
     --batch_size 4 \
     --limit 50 \
