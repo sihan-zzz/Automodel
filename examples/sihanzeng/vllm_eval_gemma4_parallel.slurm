@@ -7,7 +7,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=2000G
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --gpus-per-node=8
 #SBATCH --exclusive
 #SBATCH --output=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/logs/hf_eval_%A_%a.log
@@ -15,22 +15,24 @@
 
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo-20260401.sqsh
 HF_MODEL=${MODEL_PATH:-/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it}
-RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_gemma4_baseline
+RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_gemma4_dp8
+TASK_DIR=$HOME/Automodel/examples/sihanzeng/eval_tasks
 
 export HF_HOME=/tmp/hf_cache
 export XDG_CACHE_HOME=/tmp/xdg_cache
 export TRITON_CACHE_DIR=/tmp/triton_cache
 export PYTHONUNBUFFERED=1
 
-# Split benchmarks across 4 nodes for parallel eval
-# Matches Google Gemma IT eval setup: all 0-shot, sampling-based
+# Split benchmarks across 4 nodes
+# Local datasets: mmlu_local, gpqa_local (from Lustre)
+# HuggingFace datasets: gsm8k_cot_zeroshot, hendrycks_math, ifeval, bbh_cot_zeroshot
 declare -a TASKS LABELS
-TASKS[0]="mmlu"
-TASKS[1]="mmlu_pro,gpqa_diamond_zeroshot"
+TASKS[0]="mmlu_local"
+TASKS[1]="gpqa_local,mmlu_pro"
 TASKS[2]="gsm8k_cot_zeroshot,hendrycks_math"
 TASKS[3]="ifeval,bbh_cot_zeroshot"
 LABELS[0]="mmlu"
-LABELS[1]="mmlu_pro_gpqa"
+LABELS[1]="gpqa_mmlu_pro"
 LABELS[2]="gsm8k_math"
 LABELS[3]="ifeval_bbh"
 
@@ -39,7 +41,7 @@ LABEL=${LABELS[$SLURM_ARRAY_TASK_ID]}
 
 mkdir -p $RESULTS_DIR
 
-echo "=== HF Gemma4 26B-A4B-it Eval ==="
+echo "=== HF Gemma4 26B-A4B-it Eval (DP=8) ==="
 echo "Group: $LABEL | Tasks: $TASK"
 echo "Model: $HF_MODEL"
 echo "Node: $(hostname) | Job: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
@@ -50,12 +52,6 @@ srun --container-image=$CONTAINER \
      --container-env=HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED \
      --container-mount-home \
      bash -c "
-export WORLD_SIZE=1
-export RANK=0
-export LOCAL_RANK=0
-export MASTER_ADDR=localhost
-export MASTER_PORT=29500
-
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 
 pip install --target=/tmp/lm_eval_pkg lm-eval 2>&1 | tail -5
@@ -63,16 +59,23 @@ export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
 python3 -c 'import transformers; print(f\"transformers {transformers.__version__}\")' 2>&1
 python3 -c 'import lm_eval; print(f\"lm-eval {lm_eval.__version__}\")' 2>&1
+python3 -c 'import accelerate; print(f\"accelerate {accelerate.__version__}\")' 2>&1
 
 echo ''
-echo 'Starting: $TASK'
-python3 -m lm_eval --model hf \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
+echo 'Starting: $TASK (data parallel, 8 GPUs)'
+
+# Data parallelism: 8 full model replicas, one per GPU
+# Each GPU: 52GB model + 131GB free for KV cache
+# ~8x throughput vs model parallelism
+accelerate launch --num_processes 8 --num_machines 1 \
+    -m lm_eval --model hf \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager \
     --tasks $TASK \
     --batch_size auto \
     --apply_chat_template \
     --num_fewshot 0 \
     --gen_kwargs do_sample=True,temperature=1.0,top_k=64,top_p=1.0 \
+    --include_path $TASK_DIR \
     --output_path $RESULTS_DIR/$LABEL \
     --log_samples 2>&1
 
