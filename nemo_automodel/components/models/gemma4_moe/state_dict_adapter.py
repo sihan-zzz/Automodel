@@ -145,9 +145,26 @@ class Gemma4MoEStateDictAdapter(StateDictAdapter):
             # and absorb per_expert_scale
             down = down_proj.transpose(-2, -1) * per_expert_scale[:, None, None]  # [E, inter, hidden]
 
-            # Slice for EP
+            # Slice for EP (expert dim)
             gate_and_up_local = gate_and_up[start_expert:end_expert].to(self.dtype)
             down_local = down[start_expert:end_expert].to(self.dtype)
+
+            # Slice for EP_SHARD (hidden dim) when multi-node
+            if device_mesh is not None and "ep_shard" in device_mesh.mesh_dim_names:
+                ep_shard_mesh = state_dict_utils.get_submesh(device_mesh, ("ep_shard",))
+                if ep_shard_mesh.size() > 1:
+                    ep_shard_rank = ep_shard_mesh.get_local_rank()
+                    ep_shard_size = ep_shard_mesh.size()
+                    # gate_and_up_local: [local_E, hidden, 2*inter] — shard on dim 1
+                    gu_full = gate_and_up_local.shape[1]
+                    gu_shard = gu_full // ep_shard_size
+                    gu_start = ep_shard_rank * gu_shard
+                    gate_and_up_local = gate_and_up_local[:, gu_start:gu_start + gu_shard, :].contiguous()
+                    # down_local: [local_E, inter, hidden] — shard on dim 1
+                    d_full = down_local.shape[1]
+                    d_shard = d_full // ep_shard_size
+                    d_start = ep_shard_rank * d_shard
+                    down_local = down_local[:, d_start:d_start + d_shard, :].contiguous()
 
             prefix = f"{model_prefix}language_model.{layer_path}"
             state_dict[f"{prefix}.moe.experts.gate_and_up_projs"] = state_dict_utils.create_dtensor_from_local(
