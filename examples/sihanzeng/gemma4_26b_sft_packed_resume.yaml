@@ -1,5 +1,7 @@
 # Gemma4 26B — fast DCP resume (skip HF safetensors loading)
-# Uses from_config (meta device, no weights) + restore_from (DCP model shards only)
+# from_config: creates model on meta device (no weights, ~6s)
+# restore_from: loads model weights from DCP shards (each rank reads ~6GB)
+# optim dir removed so only model weights are loaded (fresh optimizer)
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
@@ -21,10 +23,8 @@ rng:
   ranked: true
 
 model:
-  # from_pretrained pointing at DCP sharded model dir (not consolidated HF safetensors)
-  # DCP path: each rank reads only its shard (~6GB) instead of full model (~49GB)
-  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_it_packed/epoch_0_step_199/model
+  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_config
+  config: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_it_packed/epoch_0_step_199/model/consolidated
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -41,7 +41,11 @@ model:
     enable_fsdp_optimizations: true
 
 checkpoint:
-  enabled: false
+  enabled: true
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_it_packed/
+  model_save_format: safetensors
+  save_consolidated: true
+  restore_from: epoch_0_step_199
 
 distributed:
   strategy: fsdp2
