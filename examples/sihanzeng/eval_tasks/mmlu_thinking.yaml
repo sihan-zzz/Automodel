@@ -21,21 +21,8 @@ filter_list:
   - name: thinking_flex
     filter:
       - function: regex
-        regex_pattern: "(?s).*?<channel\\|>\\s*(.*)"
-        group_select: 1
-      - function: regex
         regex_pattern: "(?i)(?:answer\\s*(?:is|:)\\s*\\(?\\s*)?([A-D])\\b"
-        group_select: 1
-      - function: uppercase
-      - function: take_first
-  - name: thinking_last_letter
-    filter:
-      - function: regex
-        regex_pattern: "(?s).*?<channel\\|>\\s*(.*)"
-        group_select: 1
-      - function: regex
-        regex_pattern: "\\b([A-D])\\s*\\.?\\s*$"
-        group_select: 1
+        group_select: -1
       - function: uppercase
       - function: take_first
 metric_list:
