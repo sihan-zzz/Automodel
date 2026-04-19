@@ -58,7 +58,7 @@ export TRITON_CACHE_DIR=/tmp/triton_cache
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 
-pip install --target=/tmp/lm_eval_pkg "lm-eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git" ray 2>&1 | tail -3
+pip install --target=/tmp/lm_eval_pkg lm-eval ray 2>&1 | tail -3
 export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
 python3 -c 'import vllm; print(f\"vLLM {vllm.__version__}\")' 2>&1
