@@ -73,13 +73,128 @@ except (ModuleNotFoundError, ImportError, AttributeError):
     HFGemma4Model = _make_missing("Gemma4Model")
     BaseModelOutputWithPast = _make_missing("BaseModelOutputWithPast")
 
-from nemo_automodel.components.models.common import BackendConfig
+from nemo_automodel.components.attention.utils import (
+    initialize_attn_module_and_func,
+    postprocess_output_for_attn,
+    preprocess_args_and_kwargs_for_attn,
+)
+from nemo_automodel.components.models.common import BackendConfig, initialize_linear_module, initialize_rms_norm_module
 from nemo_automodel.components.models.common.hf_checkpointing_mixin import HFCheckpointingMixin
 from nemo_automodel.components.moe.fsdp_mixin import MoEFSDPSyncMixin
 from nemo_automodel.components.moe.layers import MoE, MoEConfig
 from nemo_automodel.shared.utils import dtype_from_str as get_dtype
 
 from .state_dict_adapter import Gemma4MoEStateDictAdapter
+
+
+# ---------------------------------------------------------------------------
+# Custom attention using TE's DotProductAttention (cuDNN FusedAttention on B200)
+# ---------------------------------------------------------------------------
+class Gemma4NeMoAttention(nn.Module):
+    """Gemma4 attention with TE backend for fused attention kernels.
+
+    Replaces HF's Gemma4TextAttention to use TE's DotProductAttention
+    (cuDNN FusedAttention on SM90+/SM100), which supports head_dim up to 512.
+    Handles both sliding-window (head_dim=256, kv_heads=8) and full-attention
+    (global_head_dim=512, kv_heads=2, K=V) layer types.
+    """
+
+    def __init__(self, config, layer_idx: int, backend: BackendConfig):
+        super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        self.backend = backend
+
+        self.attention_type = config.layer_types[layer_idx]
+        self.is_sliding = self.attention_type == "sliding_attention"
+        self.sliding_window = config.sliding_window if self.is_sliding else None
+
+        self.head_dim = config.head_dim if self.is_sliding else (config.global_head_dim or config.head_dim)
+        self.use_kv_sharing = getattr(config, "attention_k_eq_v", False) and not self.is_sliding
+        self.num_heads = config.num_attention_heads
+        self.num_kv_heads = (
+            getattr(config, "num_global_key_value_heads", config.num_key_value_heads)
+            if self.use_kv_sharing
+            else config.num_key_value_heads
+        )
+
+        self.q_proj = initialize_linear_module(
+            backend.linear, config.hidden_size, self.num_heads * self.head_dim, False
+        )
+        self.k_proj = initialize_linear_module(
+            backend.linear, config.hidden_size, self.num_kv_heads * self.head_dim, False
+        )
+        self.v_proj = (
+            initialize_linear_module(
+                backend.linear, config.hidden_size, self.num_kv_heads * self.head_dim, False
+            )
+            if not self.use_kv_sharing
+            else None
+        )
+        self.o_proj = initialize_linear_module(
+            backend.linear, self.num_heads * self.head_dim, config.hidden_size, False
+        )
+
+        self.q_norm = initialize_rms_norm_module(backend.rms_norm, self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = initialize_rms_norm_module(backend.rms_norm, self.head_dim, eps=config.rms_norm_eps)
+        self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False)
+
+        window_size = (self.sliding_window, 0) if self.sliding_window else (-1, 0)
+        self.attn_module, self.attn_func = initialize_attn_module_and_func(
+            attn_impl=backend.attn,
+            num_attention_heads=self.num_heads,
+            num_qk_channels=self.head_dim,
+            num_v_channels=self.head_dim,
+            softmax_scale=1.0,
+            num_gqa_groups=self.num_kv_heads,
+            window_size=window_size,
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        position_embeddings,
+        attention_mask=None,
+        position_ids=None,
+        **kwargs,
+    ):
+        cos, sin = position_embeddings
+        bsz, seqlen, _ = hidden_states.shape
+
+        q = self.q_proj(hidden_states).view(bsz, seqlen, self.num_heads, self.head_dim)
+        k = self.k_proj(hidden_states).view(bsz, seqlen, self.num_kv_heads, self.head_dim)
+        v = self.v_proj(hidden_states).view(bsz, seqlen, self.num_kv_heads, self.head_dim) if self.v_proj is not None else k.clone()
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        v = self.v_norm(v)
+
+        # Gemma4 RoPE: apply_rotary_pos_emb with unsqueeze_dim=2 for [B, S, H, D]
+        cos_u = cos.unsqueeze(2)
+        sin_u = sin.unsqueeze(2)
+        def _rotate_half(x):
+            x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+            return torch.cat((-x2, x1), dim=-1)
+        q = (q * cos_u) + (_rotate_half(q) * sin_u)
+        k = (k * cos_u) + (_rotate_half(k) * sin_u)
+
+        # TE attention (bshd format)
+        q, k, v, attn_kwargs = preprocess_args_and_kwargs_for_attn(
+            q, k, v, attention_mask, self.backend.attn,
+            window_size=(self.sliding_window, 0) if self.sliding_window else (-1, 0),
+            **{kk: vv for kk, vv in kwargs.items() if kk in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv")},
+        )
+        out = self.attn_func(q, k, v, **attn_kwargs)
+        out = postprocess_output_for_attn(out, self.backend.attn)
+
+        out = self.o_proj(out.flatten(2))
+        return out, None
+
+    def init_weights(self, buffer_device: torch.device, init_std: float = 0.02):
+        for proj in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
+            if proj is not None:
+                nn.init.trunc_normal_(proj.weight, mean=0.0, std=init_std)
 
 
 # ---------------------------------------------------------------------------
@@ -189,8 +304,11 @@ class Gemma4MoEDecoderLayer(nn.Module):
         self.layer_idx = layer_idx
         self.attention_type = config.layer_types[layer_idx]
 
-        # Reuse HF modules
-        self.self_attn = Gemma4Attention(config=config, layer_idx=layer_idx)
+        # Use TE-backed attention when backend.attn is "te", otherwise HF attention
+        if backend.attn == "te":
+            self.self_attn = Gemma4NeMoAttention(config, layer_idx, backend)
+        else:
+            self.self_attn = Gemma4Attention(config=config, layer_idx=layer_idx)
         self.mlp = Gemma4MLP(config, layer_idx)
 
         # Norms
