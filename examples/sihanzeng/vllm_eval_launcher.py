@@ -3,18 +3,17 @@
 
 Patches:
 1. __main__ guard required by vLLM's spawn multiprocessing
-2. swap_space removed from EngineArgs (API changed in vLLM 0.19)
+2. EngineArgs patched to ignore swap_space (removed in vLLM 0.19)
 """
 if __name__ == "__main__":
-    import lm_eval.models.vllm_causallms as _mod
-    _OrigVLLM = _mod.VLLM
+    from vllm.engine.arg_utils import EngineArgs
+    _orig_init = EngineArgs.__init__
 
-    class PatchedVLLM(_OrigVLLM):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.model_args.pop("swap_space", None)
+    def _patched_init(self, **kwargs):
+        kwargs.pop("swap_space", None)
+        _orig_init(self, **kwargs)
 
-    _mod.VLLM = PatchedVLLM
+    EngineArgs.__init__ = _patched_init
 
     from lm_eval.__main__ import cli_evaluate
     cli_evaluate()
