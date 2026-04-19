@@ -21,8 +21,9 @@ filter_list:
   - name: thinking_flex
     filter:
       - function: regex
-        regex_pattern: "(?i)(?:answer\\s*(?:is|:)\\s*\\(?\\s*)?([A-D])\\b"
-        group_select: -1
+        regex_pattern: "<channel\\|>\\s*([A-D])"
+        group_select: 0
+        fallback: "[invalid]"
       - function: uppercase
       - function: take_first
 metric_list:
