@@ -26,6 +26,7 @@ model:
   pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
   torch_dtype: bfloat16
   trust_remote_code: true
+  attn_implementation: eager
   backend:
     _target_: nemo_automodel.components.models.common.BackendConfig
     attn: te
