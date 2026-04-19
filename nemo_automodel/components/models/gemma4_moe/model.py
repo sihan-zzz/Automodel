@@ -179,11 +179,17 @@ class Gemma4NeMoAttention(nn.Module):
         q = (q * cos_u) + (_rotate_half(q) * sin_u)
         k = (k * cos_u) + (_rotate_half(k) * sin_u)
 
-        # TE attention (bshd format)
+        # TE attention — pass None for attention_mask since TE handles causal
+        # masking internally. HF's 4D causal mask is incompatible with TE.
+        # Forward cu_seqlens from packed sequences if present.
+        te_kwargs = {}
+        for k_name in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv"):
+            if k_name in kwargs:
+                te_kwargs[k_name] = kwargs[k_name]
+        te_kwargs["window_size"] = (self.sliding_window, 0) if self.sliding_window else (-1, 0)
+
         q, k, v, attn_kwargs = preprocess_args_and_kwargs_for_attn(
-            q, k, v, attention_mask, self.backend.attn,
-            window_size=(self.sliding_window, 0) if self.sliding_window else (-1, 0),
-            **{kk: vv for kk, vv in kwargs.items() if kk in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv")},
+            q, k, v, None, self.backend.attn, **te_kwargs,
         )
         out = self.attn_func(q, k, v, **attn_kwargs)
         out = postprocess_output_for_attn(out, self.backend.attn)
