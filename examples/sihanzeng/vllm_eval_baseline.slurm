@@ -31,6 +31,8 @@ srun --container-image=$CONTAINER \
      --container-env=FLASHINFER_WORKSPACE_DIR,HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED \
      --container-mount-home \
      bash -c "
+pip install lm-eval -q 2>&1 | tail -1
+
 echo 'Running MMLU...'
 lm_eval --model hf \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,parallelize=True \
