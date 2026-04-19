@@ -28,11 +28,11 @@ export PYTHONUNBUFFERED=1
 # HuggingFace datasets: gsm8k_cot_zeroshot, hendrycks_math, ifeval, bbh_cot_zeroshot
 declare -a TASKS LABELS
 TASKS[0]="mmlu_local"
-TASKS[1]="gpqa_local,mmlu_pro"
+TASKS[1]="gpqa_local"
 TASKS[2]="gsm8k_cot_zeroshot,hendrycks_math"
 TASKS[3]="ifeval,bbh_cot_zeroshot"
 LABELS[0]="mmlu"
-LABELS[1]="gpqa_mmlu_pro"
+LABELS[1]="gpqa"
 LABELS[2]="gsm8k_math"
 LABELS[3]="ifeval_bbh"
 
@@ -71,7 +71,7 @@ accelerate launch --num_processes 8 --num_machines 1 \
     -m lm_eval --model hf \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,trust_remote_code=True,attn_implementation=eager,max_length=8192 \
     --tasks $TASK \
-    --batch_size auto \
+    --batch_size 16 \
     --apply_chat_template \
     --num_fewshot 0 \
     --gen_kwargs do_sample=True,temperature=1.0,top_k=64,top_p=1.0 \

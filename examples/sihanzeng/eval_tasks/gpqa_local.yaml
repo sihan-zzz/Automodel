@@ -2,7 +2,7 @@ task: gpqa_local
 dataset_path: json
 dataset_kwargs:
   data_files:
-    test: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/eval/gpqa/gpqa_main.jsonl
+    test: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/eval/gpqa/domains/gpqa_diamond.jsonl
 output_type: multiple_choice
 test_split: test
 doc_to_text: "{{context}}\n"
