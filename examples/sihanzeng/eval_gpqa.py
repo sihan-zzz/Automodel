@@ -38,17 +38,20 @@ def load_gpqa(path):
 
 
 def extract_answer(text):
-    """Extract answer letter from thinking output. Looks BEFORE <channel|> if present."""
-    if "<channel|>" in text:
-        text = text.split("<channel|>")[0]
+    """Extract answer letter from model output. Only searches the tail to avoid
+    matching letters mentioned in mid-reasoning discussion."""
+    # Only look at the last 500 chars for the answer
+    tail = text[-500:]
 
-    m = re.findall(r"(?:answer|choice)\s*(?:is|:)\s*\(?\s*([A-Da-d])\b", text, re.IGNORECASE)
+    # Try structured patterns first
+    m = re.findall(r"(?:answer|choice)\s*(?:is|:)\s*\(?\s*([A-Da-d])\b", tail, re.IGNORECASE)
     if m:
         return m[-1].upper()
-    m = re.findall(r"\\boxed\{([A-Da-d])\}", text)
+    m = re.findall(r"\\boxed\{([A-Da-d])\}", tail)
     if m:
         return m[-1].upper()
-    m = re.findall(r"\b([A-D])\b", text)
+    # Last standalone letter in the tail
+    m = re.findall(r"\b([A-D])\b", tail)
     if m:
         return m[-1]
     return None
