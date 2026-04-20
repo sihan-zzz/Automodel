@@ -3,6 +3,7 @@ dataset_path: TIGER-Lab/MMLU-Pro
 output_type: generate_until
 test_split: test
 num_fewshot: 0
+repeats: 3
 doc_to_text: "{{question}}\n\n{% set letters = 'ABCDEFGHIJ' %}{% for opt in options %}{{letters[loop.index0]}}. {{opt}}\n{% endfor %}\nAnswer with just the letter of the correct choice."
 doc_to_target: "{{answer}}"
 generation_kwargs:
@@ -16,13 +17,14 @@ generation_kwargs:
   do_sample: true
   max_gen_toks: 8192
 filter_list:
-  - name: thinking_flex
+  - name: "maj@3"
     filter:
       - function: regex
         regex_pattern: "(?:(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Ja-j])(?:\\.|,|\\s|$|\\))"
         group_select: -1
         fallback: "[invalid]"
       - function: uppercase
+      - function: majority_vote
       - function: take_first
 metric_list:
   - metric: exact_match
