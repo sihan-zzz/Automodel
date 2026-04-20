@@ -23,17 +23,15 @@ export XDG_CACHE_HOME=/tmp/xdg_cache
 export TRITON_CACHE_DIR=/tmp/triton_cache
 export PYTHONUNBUFFERED=1
 
-# 4 benchmarks in parallel, one per node
 declare -a TASKS LABELS LIMITS
 TASKS[0]="gpqa_diamond_native_think"
-TASKS[1]="mmlu_pro"
-TASKS[2]="bbh_cot_zeroshot"
+TASKS[1]="mmlu_pro_think"
+TASKS[2]="bbh_think"
 TASKS[3]="aime_2026"
 LABELS[0]="gpqa_diamond"
 LABELS[1]="mmlu_pro"
 LABELS[2]="bbh"
 LABELS[3]="aime_2026"
-# Limits: 0 = full dataset. Set >0 for subsampling
 LIMITS[0]=0
 LIMITS[1]=500
 LIMITS[2]=500
@@ -46,7 +44,7 @@ LIMIT=${LIMITS[$SLURM_ARRAY_TASK_ID]}
 mkdir -p $RESULTS_DIR
 
 echo "=== Benchmark: $LABEL ==="
-echo "Task: $TASK"
+echo "Task: $TASK | Limit: $LIMIT"
 echo "Node: $(hostname) | Job: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "Start: $(date)"
 
@@ -58,20 +56,26 @@ srun --container-image=$CONTAINER \
 mkdir -p /tmp/hf_cache /tmp/xdg_cache /tmp/triton_cache
 export HF_HOME=/tmp/hf_cache XDG_CACHE_HOME=/tmp/xdg_cache TRITON_CACHE_DIR=/tmp/triton_cache
 
+# Copy model to local SSD for fast loading
+echo 'Copying model to local...'
+LOCAL_MODEL=/tmp/model_local
+cp -r $HF_MODEL \$LOCAL_MODEL
+echo 'Model copied to local SSD'
+
 pip install --target=/tmp/lm_eval_pkg lm-eval ray 2>&1 | tail -3
 export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
 echo 'vLLM:' \$(python3 -c 'import vllm; print(vllm.__version__)' 2>&1)
-echo 'lm-eval:' \$(python3 -c 'import lm_eval; print(lm_eval.__version__)' 2>&1)
 echo ''
-echo 'Starting: $TASK'
+echo 'Starting: $TASK (limit=$LIMIT)'
 echo 'Gen start: '\$(date)
 
 LAUNCHER=\$HOME/Automodel/examples/sihanzeng/vllm_eval_launcher_minimal.py
 LIMIT_FLAG=''
 if [ $LIMIT -gt 0 ]; then LIMIT_FLAG='--limit $LIMIT'; fi
+
 python3 \$LAUNCHER --model vllm \
-    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
+    --model_args pretrained=\$LOCAL_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
     --tasks $TASK \
     --batch_size 64 \
     --num_fewshot 0 \

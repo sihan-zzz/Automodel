@@ -1,0 +1,30 @@
+task: mmlu_pro_think
+dataset_path: TIGER-Lab/MMLU-Pro
+output_type: generate_until
+test_split: test
+num_fewshot: 0
+doc_to_text: "{{question}}\n\n{% set letters = 'ABCDEFGHIJ' %}{% for opt in options %}{{letters[loop.index0]}}. {{opt}}\n{% endfor %}\nAnswer with just the letter of the correct choice."
+doc_to_target: "{{answer}}"
+generation_kwargs:
+  until:
+    - "<end_of_turn>"
+    - "<eos>"
+    - "<turn|>"
+  temperature: 1.0
+  top_k: 64
+  top_p: 0.95
+  do_sample: true
+  max_gen_toks: 8192
+filter_list:
+  - name: thinking_flex
+    filter:
+      - function: regex
+        regex_pattern: "(?:(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Ja-j])(?:\\.|,|\\s|$|\\))"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: uppercase
+      - function: take_first
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
