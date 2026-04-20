@@ -93,32 +93,18 @@ class StreamingUnpackedDataset(IterableDataset):
         )
         self.dataset = self.blended
 
-    def _build_gemma4_text(self, turns, roles):
-        """Build Gemma4 chat format manually to preserve <think> tags.
-
-        Gemma4 format: <bos><|turn>role\ncontent<turn|>\n...
-        The native apply_chat_template strips <think> blocks via strip_thinking(),
-        so we construct the format directly.
-        """
-        role_map_gemma = {"assistant": "model", "user": "user", "system": "system"}
-        parts = []
-        for i, (turn, role) in enumerate(zip(turns, roles)):
-            gemma_role = role_map_gemma.get(role, role)
-            parts.append(f"<|turn>{gemma_role}\n{turn}<turn|>\n")
-        return "".join(parts)
-
     def _convert_and_tokenize(self, sample):
-        """Convert dialog to (input_ids, labels) with assistant-only loss masking.
+        """Convert dialog to (input_ids, labels) using apply_chat_template.
 
-        Uses keep_loss field from data if available, otherwise masks non-assistant turns.
-        Preserves <think>...</think> tags in assistant content (Gemma4's template strips them).
+        Uses the tokenizer's chat template for correct formatting.
+        Labels use next-token prediction: labels[i] = input_ids[i+1] for
+        assistant turns, -100 for user/system turns.
         Returns None if sample exceeds seq_length (drop, not truncate).
         """
         dialog = sample.get("dialog", sample.get("conversations", []))
         keep_loss = sample.get("keep_loss", None)
 
-        turns = []
-        roles = []
+        messages = []
         should_keep_loss = []
         for i, turn in enumerate(dialog):
             if isinstance(turn, dict):
@@ -130,54 +116,44 @@ class StreamingUnpackedDataset(IterableDataset):
                 }
                 role = role_map.get(role, role.lower())
                 if role in ("user", "assistant", "system") and content:
-                    turns.append(content)
-                    roles.append(role)
+                    messages.append({"role": role, "content": content})
                     if keep_loss is not None and i < len(keep_loss):
                         should_keep_loss.append(bool(keep_loss[i]))
                     else:
                         should_keep_loss.append(role == "assistant")
 
-        if len(turns) < 2:
+        if len(messages) < 2:
             return None
 
         try:
+            # Tokenize incrementally to find turn boundaries
             input_ids = []
             labels = []
 
-            # Tokenize BOS
-            bos_ids = [self.tokenizer.bos_token_id] if self.tokenizer.bos_token_id is not None else []
-            input_ids.extend(bos_ids)
-            labels.extend([CROSS_ENTROPY_IGNORE_IDX] * len(bos_ids))
+            for i in range(len(messages)):
+                prefix = self.tokenizer.apply_chat_template(
+                    messages[:i], tokenize=False, add_generation_prompt=False,
+                ) if i > 0 else ""
+                full = self.tokenizer.apply_chat_template(
+                    messages[:i + 1], tokenize=False, add_generation_prompt=False,
+                )
 
-            for i, (content, role, has_loss) in enumerate(zip(turns, roles, should_keep_loss)):
-                gemma_role = "model" if role == "assistant" else role
-                header = f"<|turn>{gemma_role}\n"
-                footer = "<turn|>\n"
-
-                header_ids = self.tokenizer(
-                    header, add_special_tokens=False, return_tensors=None,
-                )["input_ids"]
-                content_ids = self.tokenizer(
-                    content, add_special_tokens=False, return_tensors=None,
-                )["input_ids"]
-                footer_ids = self.tokenizer(
-                    footer, add_special_tokens=False, return_tensors=None,
+                prefix_ids = self.tokenizer(
+                    prefix, truncation=False, padding=False, return_tensors=None,
+                )["input_ids"] if prefix else []
+                full_ids = self.tokenizer(
+                    full, truncation=False, padding=False, return_tensors=None,
                 )["input_ids"]
 
-                # Header (turn marker + role): always masked
-                input_ids.extend(header_ids)
-                labels.extend([CROSS_ENTROPY_IGNORE_IDX] * len(header_ids))
+                turn_ids = full_ids[len(prefix_ids):]
 
-                # Content: only compute loss if has_loss
-                input_ids.extend(content_ids)
-                if has_loss:
-                    labels.extend(list(content_ids))
+                if should_keep_loss[i]:
+                    turn_labels = list(turn_ids)
                 else:
-                    labels.extend([CROSS_ENTROPY_IGNORE_IDX] * len(content_ids))
+                    turn_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(turn_ids)
 
-                # Footer (turn end): masked
-                input_ids.extend(footer_ids)
-                labels.extend([CROSS_ENTROPY_IGNORE_IDX] * len(footer_ids))
+                input_ids.extend(turn_ids)
+                labels.extend(turn_labels)
 
             self._total_count += 1
 
