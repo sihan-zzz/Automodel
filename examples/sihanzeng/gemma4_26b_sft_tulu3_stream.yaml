@@ -1,16 +1,16 @@
 # Gemma4 26B SFT — Tulu3 only via StreamingPackedDataset
-# Same data as ChatDataset baseline but using our streaming packer
-# For debugging: comparing loss/grad with ChatDataset
+# Same training config as Step3.5+JackRong run for fair comparison
+# Tests if grad spikes come from packer vs data
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
 step_scheduler:
-  global_batch_size: 16
-  local_batch_size: 2
-  ckpt_every_steps: 500
+  global_batch_size: 128
+  local_batch_size: 1
+  ckpt_every_steps: 50
   val_every_steps: 500
   num_epochs: 1
-  max_steps: 50
+  max_steps: 200
 
 dist_env:
   backend: nccl
@@ -59,8 +59,8 @@ dataset:
   sources:
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
       weight: 1.0
-  seq_length: 8192
-  packed_sequence_size: 8192
+  seq_length: 16384
+  packed_sequence_size: 16384
   shuffle_buffer_size: 64
   split: train
 
@@ -70,7 +70,7 @@ packed_sequence:
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: streaming_packed_dataset.packed_thd_collater_with_mm
-  batch_size: 2
+  batch_size: 1
   num_workers: 4
   prefetch_factor: 10
   pin_memory: true
@@ -78,6 +78,12 @@ dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 2e-5
+  lr: 2e-6
   weight_decay: 0.01
   betas: [0.9, 0.95]
+
+lr_scheduler:
+  lr_warmup_steps: 20
+  lr_decay_steps: 200
+  lr_decay_style: cosine
+  min_lr: 2e-7
