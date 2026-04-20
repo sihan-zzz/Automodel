@@ -97,37 +97,45 @@ def main():
         llm_kwargs["data_parallel_size"] = args.dp
     llm = LLM(**llm_kwargs)
 
-    sp = SamplingParams(max_tokens=args.max_tokens, temperature=1.0, top_k=64, top_p=0.95)
+    seed = 42 + args.run_id * 1000
+    sp = SamplingParams(max_tokens=args.max_tokens, temperature=1.0, top_k=64, top_p=0.95, seed=seed)
+    print(f"Seed: {seed}")
 
     print("Generating...")
     t0 = time.time()
     outputs = llm.generate(prompts, sp)
     elapsed = time.time() - t0
 
-    # Decode with special tokens preserved
+    # Score: use token IDs to find <channel|> (101), extract from clean text
+    CHANNEL_CLOSE_ID = 101  # <channel|>
     correct = 0
     completed = 0
     results = []
     for i, (sample, out) in enumerate(zip(samples, outputs)):
         token_ids = list(out.outputs[0].token_ids)
-        # Decode preserving special tokens
-        text_with_special = tok.decode(token_ids, skip_special_tokens=False)
-        text_clean = out.outputs[0].text
+        text_clean = out.outputs[0].text  # special tokens stripped
+
+        # Check if <channel|> token exists in output
+        has_channel = CHANNEL_CLOSE_ID in token_ids
+        if has_channel:
+            completed += 1
+            # Find position of <channel|>, decode text BEFORE it (thinking part)
+            ch_pos = len(token_ids) - 1 - token_ids[::-1].index(CHANNEL_CLOSE_ID)
+            thinking_text = tok.decode(token_ids[:ch_pos], skip_special_tokens=True)
+            extracted = extract_answer(thinking_text)
+        else:
+            # Truncated — fallback to last letter in clean text
+            extracted = extract_answer(text_clean)
 
         target = sample["answer"]
-        extracted = extract_answer(text_with_special)
         is_correct = extracted == target
         if is_correct:
             correct += 1
 
-        has_channel = "<channel|>" in text_with_special
-        if has_channel:
-            completed += 1
-
         results.append({
             "idx": i, "target": target, "extracted": extracted,
             "correct": is_correct, "has_channel": has_channel,
-            "len_tokens": len(token_ids), "len_chars": len(text_with_special),
+            "len_tokens": len(token_ids),
         })
 
     total = len(samples)
