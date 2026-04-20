@@ -11,7 +11,7 @@
 #SBATCH --gpus-per-node=8
 #SBATCH --exclusive
 #SBATCH --output=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/logs/bench_%A_%a.log
-#SBATCH --array=0-3
+#SBATCH --array=0-2
 
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/vllm-v0.19.1-cu130.sqsh
 HF_MODEL=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
@@ -25,34 +25,25 @@ export PYTHONUNBUFFERED=1
 
 # Custom tasks use our thinking_flex filter (answer BEFORE <channel|>)
 # BBH uses built-in extractors with think_end_token=NOMATCH (full output to extractors)
-declare -a TASKS LABELS LIMITS THINK_TOKENS
+declare -a TASKS LABELS LIMITS
 TASKS[0]="gpqa_diamond_native_think"
 TASKS[1]="mmlu_pro_think"
-TASKS[2]="bbh_cot_zeroshot"
-TASKS[3]="aime_2026"
+TASKS[2]="aime_2026"
 LABELS[0]="gpqa_diamond"
 LABELS[1]="mmlu_pro"
-LABELS[2]="bbh"
-LABELS[3]="aime_2026"
+LABELS[2]="aime_2026"
 LIMITS[0]=0
 LIMITS[1]=500
-LIMITS[2]=500
-LIMITS[3]=0
-# BBH uses NOMATCH so built-in extractors get full thinking output
-THINK_TOKENS[0]="<channel|>"
-THINK_TOKENS[1]="<channel|>"
-THINK_TOKENS[2]="NOMATCH_NEVER"
-THINK_TOKENS[3]="<channel|>"
+LIMITS[2]=0
 
 TASK=${TASKS[$SLURM_ARRAY_TASK_ID]}
 LABEL=${LABELS[$SLURM_ARRAY_TASK_ID]}
 LIMIT=${LIMITS[$SLURM_ARRAY_TASK_ID]}
-THINK_TOKEN=${THINK_TOKENS[$SLURM_ARRAY_TASK_ID]}
 
 mkdir -p $RESULTS_DIR
 
 echo "=== Benchmark: $LABEL ==="
-echo "Task: $TASK | Limit: $LIMIT | think_end_token: $THINK_TOKEN"
+echo "Task: $TASK | Limit: $LIMIT"
 echo "Node: $(hostname) | Job: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "Start: $(date)"
 
@@ -81,7 +72,7 @@ LIMIT_FLAG=''
 if [ $LIMIT -gt 0 ]; then LIMIT_FLAG='--limit $LIMIT'; fi
 
 python3 \$LAUNCHER --model vllm \
-    --model_args pretrained=\$LOCAL_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='$THINK_TOKEN' \
+    --model_args pretrained=\$LOCAL_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
     --tasks $TASK \
     --batch_size 64 \
     --num_fewshot 0 \
