@@ -1,4 +1,4 @@
-task: gpqa_diamond_single
+task: gpqa_diamond_avg3
 dataset_path: parquet
 dataset_kwargs:
   data_files:
@@ -6,7 +6,7 @@ dataset_kwargs:
 output_type: generate_until
 test_split: test
 num_fewshot: 0
-repeats: 1
+repeats: 3
 doc_to_text: "{{question}}\n\nAnswer with just the letter of the correct choice."
 doc_to_target: "{{answer.strip().upper()}}"
 generation_kwargs:
@@ -20,7 +20,7 @@ generation_kwargs:
   do_sample: true
   max_gen_toks: 31000
 filter_list:
-  - name: "pass@1"
+  - name: "avg@3"
     filter:
       - function: regex
         regex_pattern: "(?:(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Da-d])(?:\\.|,|\\s|$|\\))"

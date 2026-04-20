@@ -24,14 +24,14 @@ export TRITON_CACHE_DIR=/tmp/triton_cache
 export PYTHONUNBUFFERED=1
 
 # 0-2: maj@3 (repeats=3, majority_vote) with seeds 42/1042/2042
-# 3-5: single pass (repeats=1) with seeds 42/1042/2042
+# 3-5: avg@3 (repeats=3, independent scoring) with seeds 42/1042/2042
 if [ $SLURM_ARRAY_TASK_ID -lt 3 ]; then
     TASK="gpqa_diamond_native_think"
     MODE="maj3"
     RUN_ID=$SLURM_ARRAY_TASK_ID
 else
-    TASK="gpqa_diamond_single"
-    MODE="single"
+    TASK="gpqa_diamond_avg3"
+    MODE="avg3"
     RUN_ID=$((SLURM_ARRAY_TASK_ID - 3))
 fi
 SEED=$((42 + RUN_ID * 1000))
