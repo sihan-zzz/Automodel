@@ -36,7 +36,7 @@ LABELS[2]="bbh"
 LABELS[3]="aime_2026"
 LIMITS[0]=0
 LIMITS[1]=500
-LIMITS[2]=0
+LIMITS[2]=500
 LIMITS[3]=0
 # BBH uses NOMATCH so built-in extractors get full thinking output
 THINK_TOKENS[0]="<channel|>"
