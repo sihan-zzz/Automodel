@@ -89,5 +89,6 @@ optimizer:
 
 lr_scheduler:
   lr_warmup_steps: 50
+  lr_decay_steps: 500
   lr_decay_style: cosine
   min_lr: 5e-7
