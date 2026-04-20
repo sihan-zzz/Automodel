@@ -35,12 +35,12 @@ def packed_thd_collater_with_mm(batch):
     return result
 
 
-class StreamingPackedDataset(IterableDataset):
-    """Streaming dataset that blends, tokenizes, packs, and shuffles on-the-fly.
+class StreamingUnpackedDataset(IterableDataset):
+    """Streaming dataset that blends, tokenizes, and shuffles on-the-fly.
 
-    Yields pre-packed dicts with keys:
-        input_ids, labels, position_ids, seq_lens, seq_lens_padded
-    all sized to packed_sequence_size, ready for packed_sequence_thd_collater.
+    Unlike StreamingPackedDataset, yields individual conversations (not packed).
+    Each sample is a single tokenized conversation with proper loss masking.
+    Compatible with default_collater (pads within batch).
     """
 
     def __init__(
@@ -59,11 +59,9 @@ class StreamingPackedDataset(IterableDataset):
     ):
         self.tokenizer = tokenizer
         self.seq_length = seq_length
-        self.pack_size = packed_sequence_size or seq_length
         self.seed = seed
         self.message_key = message_key
         self.shuffle_buffer_size = shuffle_buffer_size
-        self.drop_last = drop_last
         self._drop_count = 0
         self._total_count = 0
 
@@ -93,7 +91,6 @@ class StreamingPackedDataset(IterableDataset):
             seed=seed,
             stopping_strategy="all_exhausted",
         )
-        # Expose for split_dataset_by_node sharding in build_dataloader
         self.dataset = self.blended
 
     def _build_gemma4_text(self, turns, roles):
@@ -200,99 +197,32 @@ class StreamingPackedDataset(IterableDataset):
         except Exception:
             return None
 
-    def _tokenized_stream(self):
-        """Yields (input_ids, labels) tuples from the blended source."""
-        for sample in self.blended:
-            result = self._convert_and_tokenize(sample)
-            if result is not None:
-                yield result
-
-    def _packing_stream(self):
-        """Online sequence packer. Yields fixed-size packed samples (THD format)."""
-        pack_size = self.pack_size
-        pad_id = getattr(self.tokenizer, "pad_token_id", None) or 0
-
-        buf_ids: list[int] = []
-        buf_labels: list[int] = []
-        buf_pos: list[int] = []
-        buf_seq_lens: list[int] = []
-
-        for input_ids, labels in self._tokenized_stream():
-            seq_len = len(input_ids)
-
-            space_left = pack_size - len(buf_ids)
-
-            if seq_len <= space_left:
-                buf_ids.extend(input_ids)
-                buf_labels.extend(labels)
-                buf_pos.extend(range(seq_len))
-                buf_seq_lens.append(seq_len)
-            else:
-                if buf_ids:
-                    yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
-
-                buf_ids = list(input_ids)
-                buf_labels = list(labels)
-                buf_pos = list(range(seq_len))
-                buf_seq_lens = [seq_len]
-
-        if buf_ids and not self.drop_last:
-            yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
-
-    def _finalize_pack(self, buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id):
-        """Pad to pack_size and return a THD-format dict.
-
-        Labels are shifted per sub-sequence: labels[i] = input_ids[i+1] within
-        each packed conversation, with -100 at boundaries and padding.
-        This matches HF's convention where model logits[i] predicts position i+1.
-        """
-        pack_size = self.pack_size
-        cur_len = len(buf_ids)
-        pad_len = pack_size - cur_len
-
-        if pad_len > 0:
-            buf_ids = buf_ids + [pad_id] * pad_len
-            buf_labels = buf_labels + [CROSS_ENTROPY_IGNORE_IDX] * pad_len
-            last_pos = buf_pos[-1] if buf_pos else 0
-            buf_pos = buf_pos + list(range(last_pos + 1, last_pos + 1 + pad_len))
-
-        # Shift labels within each sub-sequence, mask boundaries
-        # shifted_labels[i] = input_ids[i+1] only if position i has loss in original labels
-        shifted_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(buf_labels)
-        offset = 0
-        for seq_len in buf_seq_lens:
-            for i in range(offset, offset + seq_len - 1):
-                if buf_labels[i] != CROSS_ENTROPY_IGNORE_IDX:
-                    shifted_labels[i] = buf_ids[i + 1]
-            # Last position of each sub-sequence: mask (can't predict next seq)
-            offset += seq_len
-
-        seq_lens_padded = list(buf_seq_lens)
-        if pad_len > 0:
-            seq_lens_padded[-1] = seq_lens_padded[-1] + pad_len
-
-        return {
-            "input_ids": buf_ids,
-            "labels": shifted_labels,
-            "position_ids": buf_pos,
-            "seq_lens": list(buf_seq_lens),
-            "seq_lens_padded": seq_lens_padded,
-        }
-
     def __iter__(self):
-        """Yields packed samples with optional reservoir shuffle."""
+        """Yields individual tokenized conversations with reservoir shuffle."""
         self._drop_count = 0
         self._total_count = 0
-        packing_iter = self._packing_stream()
+
+        def sample_stream():
+            for sample in self.blended:
+                result = self._convert_and_tokenize(sample)
+                if result is not None:
+                    input_ids, labels = result
+                    yield {
+                        "input_ids": input_ids,
+                        "labels": labels,
+                        "mm_token_type_ids": [0] * len(input_ids),
+                    }
+
+        stream = sample_stream()
 
         if self.shuffle_buffer_size <= 0:
-            yield from packing_iter
+            yield from stream
             return
 
         rng = random.Random(self.seed)
         buffer = []
 
-        for item in packing_iter:
+        for item in stream:
             buffer.append(item)
             if len(buffer) == self.shuffle_buffer_size:
                 break
@@ -301,7 +231,7 @@ class StreamingPackedDataset(IterableDataset):
             return
 
         rng.shuffle(buffer)
-        for item in packing_iter:
+        for item in stream:
             idx = rng.randrange(len(buffer))
             yield buffer[idx]
             buffer[idx] = item

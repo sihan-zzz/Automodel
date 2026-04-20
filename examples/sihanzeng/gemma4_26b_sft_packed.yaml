@@ -1,13 +1,12 @@
 # Gemma4 26B-A4B-it MoE SFT — Step3.5 (0.5) + JackRong SFT (0.5)
-# 16k packed sequences, 4 nodes, assistant-only loss masking
-# Samples > 16k are dropped (not truncated)
-# lr=2e-6 cosine decay, global_bs=128 (grad_acc=4) for stable training
+# Unpacked streaming: each sample is one conversation (no packing)
+# lr=2e-6 cosine decay, 4 nodes, assistant-only loss masking
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
 step_scheduler:
   global_batch_size: 128
-  local_batch_size: 1
+  local_batch_size: 2
   ckpt_every_steps: 50
   val_every_steps: 500
   num_epochs: 1
@@ -42,7 +41,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_bs128/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_unpacked/
   model_save_format: safetensors
   save_consolidated: true
 
@@ -59,15 +58,14 @@ loss_fn:
   _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
 
 dataset:
-  _target_: streaming_packed_dataset.StreamingPackedDataset
+  _target_: streaming_packed_dataset.StreamingUnpackedDataset
   sources:
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/step_3p5_flash_sft
       weight: 0.5
     - path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/jackrong_sft
       weight: 0.5
   seq_length: 16384
-  packed_sequence_size: 16384
-  shuffle_buffer_size: 64
+  shuffle_buffer_size: 256
   split: train
 
 packed_sequence:
@@ -75,8 +73,7 @@ packed_sequence:
 
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
-  collate_fn: streaming_packed_dataset.packed_thd_collater_with_mm
-  batch_size: 1
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
   num_workers: 4
   prefetch_factor: 10
   pin_memory: true
