@@ -44,6 +44,8 @@ srun --container-image=$CONTAINER \
 mkdir -p /tmp/hf_cache /tmp/xdg_cache /tmp/triton_cache
 export HF_HOME=/tmp/hf_cache XDG_CACHE_HOME=/tmp/xdg_cache TRITON_CACHE_DIR=/tmp/triton_cache PYTHONUNBUFFERED=1
 
+pip install pyarrow 2>&1 | tail -1
+
 python3 $SCRIPT \
     --model $HF_MODEL \
     --data $DATA \
