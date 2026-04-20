@@ -1,0 +1,32 @@
+task: gpqa_diamond_thinking_sample
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/eval/gpqa_diamond/test/gpqa_diamond.parquet
+output_type: generate_until
+test_split: test
+num_fewshot: 0
+doc_to_text: "{{question}}\n\nAnswer with just the letter of the correct choice."
+doc_to_target: "{{answer.strip().upper()}}"
+generation_kwargs:
+  until:
+    - "<end_of_turn>"
+    - "<eos>"
+  temperature: 1.0
+  top_k: 64
+  top_p: 0.95
+  do_sample: true
+  max_gen_toks: 24576
+filter_list:
+  - name: thinking_flex
+    filter:
+      - function: regex
+        regex_pattern: "<channel\\|>\\s*(?:(?:The\\s+)?(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Da-d])"
+        group_select: 0
+        fallback: "[invalid]"
+      - function: uppercase
+      - function: take_first
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true

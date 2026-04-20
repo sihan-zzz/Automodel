@@ -27,9 +27,9 @@ export PYTHONUNBUFFERED=1
 # Thinking-mode eval: generative with reasoning
 declare -a TASKS LABELS
 TASKS[0]="gpqa_diamond_thinking"
-TASKS[1]="mmlu_thinking"
-LABELS[0]="gpqa_diamond"
-LABELS[1]="mmlu_thinking"
+TASKS[1]="gpqa_diamond_thinking_sample"
+LABELS[0]="gpqa_diamond_greedy"
+LABELS[1]="gpqa_diamond_sample"
 
 TASK=${TASKS[$SLURM_ARRAY_TASK_ID]}
 LABEL=${LABELS[$SLURM_ARRAY_TASK_ID]}
