@@ -6,7 +6,7 @@ dataset_kwargs:
 output_type: generate_until
 test_split: test
 num_fewshot: 0
-doc_to_text: "{{question}}\n\nAnswer with just the letter of the correct choice."
+doc_to_text: "{{question}}\n\nThink step by step. After your reasoning, state your final answer as a single letter (A, B, C, or D) on its own line."
 doc_to_target: "{{answer.strip().upper()}}"
 generation_kwargs:
   until:
@@ -14,13 +14,13 @@ generation_kwargs:
     - "<eos>"
   temperature: 0
   do_sample: false
-  max_gen_toks: 24576
+  max_gen_toks: 31000
 filter_list:
   - name: thinking_flex
     filter:
       - function: regex
-        regex_pattern: "<channel\\|>\\s*(?:(?:The\\s+)?(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Da-d])"
-        group_select: 0
+        regex_pattern: "(?:(?:answer|choice)\\s*(?:is|:)\\s*\\(?\\s*)?([A-Da-d])(?:\\.|,|\\s|$|\\))(?:.*<channel\\|>|.*$)"
+        group_select: -1
         fallback: "[invalid]"
       - function: uppercase
       - function: take_first
