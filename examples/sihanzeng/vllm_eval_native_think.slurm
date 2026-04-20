@@ -50,8 +50,9 @@ echo ''
 echo 'Native enable_thinking + think_end_token, DP=8'
 echo 'Start gen: '\$(date)
 
-# No custom launcher needed — lm-eval handles enable_thinking natively
-python3 -m lm_eval --model vllm \
+# Minimal launcher: only patches swap_space for vLLM 0.19 compat
+LAUNCHER=\$HOME/Automodel/examples/sihanzeng/vllm_eval_launcher_minimal.py
+python3 \$LAUNCHER --model vllm \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
     --tasks gpqa_diamond_native_think \
     --batch_size 64 \
