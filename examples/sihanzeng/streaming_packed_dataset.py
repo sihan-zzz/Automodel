@@ -240,7 +240,12 @@ class StreamingPackedDataset(IterableDataset):
             yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
 
     def _finalize_pack(self, buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id):
-        """Pad to pack_size and return a THD-format dict."""
+        """Pad to pack_size and return a THD-format dict.
+
+        Labels are shifted per sub-sequence: labels[i] = input_ids[i+1] within
+        each packed conversation, with -100 at boundaries and padding.
+        This matches HF's convention where model logits[i] predicts position i+1.
+        """
         pack_size = self.pack_size
         cur_len = len(buf_ids)
         pad_len = pack_size - cur_len
@@ -251,13 +256,23 @@ class StreamingPackedDataset(IterableDataset):
             last_pos = buf_pos[-1] if buf_pos else 0
             buf_pos = buf_pos + list(range(last_pos + 1, last_pos + 1 + pad_len))
 
+        # Shift labels within each sub-sequence, mask boundaries
+        shifted_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(buf_labels)
+        offset = 0
+        for seq_len in buf_seq_lens:
+            for i in range(offset, offset + seq_len - 1):
+                if buf_labels[i + 1] != CROSS_ENTROPY_IGNORE_IDX:
+                    shifted_labels[i] = buf_ids[i + 1]
+            # Last position of each sub-sequence: mask (can't predict next seq)
+            offset += seq_len
+
         seq_lens_padded = list(buf_seq_lens)
         if pad_len > 0:
             seq_lens_padded[-1] = seq_lens_padded[-1] + pad_len
 
         return {
             "input_ids": buf_ids,
-            "labels": buf_labels,
+            "labels": shifted_labels,
             "position_ids": buf_pos,
             "seq_lens": list(buf_seq_lens),
             "seq_lens_padded": seq_lens_padded,
