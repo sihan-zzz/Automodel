@@ -38,19 +38,19 @@ def load_gpqa(path):
 
 
 def extract_answer(text):
-    """Extract answer letter from model output. Only searches the tail to avoid
-    matching letters mentioned in mid-reasoning discussion."""
-    # Only look at the last 500 chars for the answer
-    tail = text[-500:]
+    """Extract answer letter from model output."""
+    # Priority 1: \boxed{X} anywhere in the text (last occurrence)
+    m = re.findall(r"\\boxed\{([A-Da-d])\}", text)
+    if m:
+        return m[-1].upper()
 
-    # Try structured patterns first
+    # Priority 2: "answer is X" in last 500 chars
+    tail = text[-500:]
     m = re.findall(r"(?:answer|choice)\s*(?:is|:)\s*\(?\s*([A-Da-d])\b", tail, re.IGNORECASE)
     if m:
         return m[-1].upper()
-    m = re.findall(r"\\boxed\{([A-Da-d])\}", tail)
-    if m:
-        return m[-1].upper()
-    # Last standalone letter in the tail
+
+    # Priority 3: last standalone letter in tail
     m = re.findall(r"\b([A-D])\b", tail)
     if m:
         return m[-1]
@@ -79,7 +79,7 @@ def main():
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(args.model)
 
-    instruction = "Think step by step. After your reasoning, state your final answer as a single letter (A, B, C, or D) on its own line."
+    instruction = "Think step by step. Put your final answer in \\boxed{}, e.g. \\boxed{A}."
     prompts = []
     for s in samples:
         messages = [{"role": "user", "content": s["question"] + "\n\n" + instruction}]
