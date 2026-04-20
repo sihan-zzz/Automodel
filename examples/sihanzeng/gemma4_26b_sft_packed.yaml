@@ -41,7 +41,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_v2/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_cosine/
   model_save_format: safetensors
   save_consolidated: true
 
@@ -86,3 +86,8 @@ optimizer:
   lr: 5e-6
   weight_decay: 0.01
   betas: [0.9, 0.95]
+
+lr_scheduler:
+  lr_warmup_steps: 50
+  lr_decay_style: cosine
+  min_lr: 5e-7
