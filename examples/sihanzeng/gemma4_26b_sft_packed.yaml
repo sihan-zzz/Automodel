@@ -83,6 +83,6 @@ dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 2e-5
+  lr: 5e-6
   weight_decay: 0.01
   betas: [0.9, 0.95]
