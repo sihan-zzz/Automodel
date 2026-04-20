@@ -9,7 +9,7 @@ step_scheduler:
   ckpt_every_steps: 500
   val_every_steps: 500
   num_epochs: 1
-  max_steps: 50
+  max_steps: 500
 
 dist_env:
   backend: nccl
@@ -39,7 +39,10 @@ model:
     enable_fsdp_optimizations: true
 
 checkpoint:
-  enabled: false
+  enabled: true
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_chatds_500/
+  model_save_format: safetensors
+  save_consolidated: true
 
 distributed:
   strategy: fsdp2
