@@ -10,7 +10,7 @@ step_scheduler:
   ckpt_every_steps: 500
   val_every_steps: 500
   num_epochs: 1
-  max_steps: 500
+  max_steps: 50
 
 dist_env:
   backend: nccl
@@ -41,7 +41,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_16k_4node/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_shardfix/
   model_save_format: safetensors
   save_consolidated: true
 
