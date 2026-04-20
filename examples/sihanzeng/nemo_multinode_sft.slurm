@@ -7,7 +7,7 @@
 #SBATCH --account=ads_cpt
 #SBATCH --partition=a4
 #SBATCH --qos=ads_cpt
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=2000G
@@ -19,7 +19,7 @@
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo-20260401.sqsh
 AUTOMODEL_DIR=$HOME/Automodel
 SCRIPTS_DIR=$AUTOMODEL_DIR/examples/sihanzeng
-CONFIG_FILE=${CONFIG:-gemma4_26b_sft_packed_2node.yaml}
+CONFIG_FILE=${CONFIG:-gemma4_26b_sft_packed_4node.yaml}
 CONFIG=$SCRIPTS_DIR/$CONFIG_FILE
 
 # Rendezvous for multi-node torchrun
