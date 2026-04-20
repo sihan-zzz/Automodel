@@ -169,7 +169,13 @@ class StreamingUnpackedDataset(IterableDataset):
             if len(input_ids) < 2:
                 return None
 
-            return input_ids, labels
+            # Shift labels: labels[i] = input_ids[i+1] for loss positions
+            shifted = [CROSS_ENTROPY_IGNORE_IDX] * len(labels)
+            for j in range(len(labels) - 1):
+                if labels[j] != CROSS_ENTROPY_IGNORE_IDX:
+                    shifted[j] = input_ids[j + 1]
+
+            return input_ids, shifted
         except Exception:
             return None
 
