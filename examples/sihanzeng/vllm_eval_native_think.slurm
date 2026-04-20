@@ -24,7 +24,7 @@ export TRITON_CACHE_DIR=/tmp/triton_cache
 export PYTHONUNBUFFERED=1
 
 # 4 benchmarks in parallel, one per node
-declare -a TASKS LABELS
+declare -a TASKS LABELS LIMITS
 TASKS[0]="gpqa_diamond_native_think"
 TASKS[1]="mmlu_pro"
 TASKS[2]="bbh_cot_zeroshot"
@@ -33,9 +33,15 @@ LABELS[0]="gpqa_diamond"
 LABELS[1]="mmlu_pro"
 LABELS[2]="bbh"
 LABELS[3]="aime_2026"
+# Limits: 0 = full dataset. Set >0 for subsampling
+LIMITS[0]=0
+LIMITS[1]=500
+LIMITS[2]=500
+LIMITS[3]=0
 
 TASK=${TASKS[$SLURM_ARRAY_TASK_ID]}
 LABEL=${LABELS[$SLURM_ARRAY_TASK_ID]}
+LIMIT=${LIMITS[$SLURM_ARRAY_TASK_ID]}
 
 mkdir -p $RESULTS_DIR
 
@@ -71,6 +77,7 @@ python3 \$LAUNCHER --model vllm \
     --fewshot_as_multiturn \
     --include_path $TASK_DIR \
     --output_path $RESULTS_DIR/$LABEL \
+    \$([ $LIMIT -gt 0 ] && echo "--limit $LIMIT") \
     --log_samples 2>&1
 
 echo ''
