@@ -257,11 +257,12 @@ class StreamingPackedDataset(IterableDataset):
             buf_pos = buf_pos + list(range(last_pos + 1, last_pos + 1 + pad_len))
 
         # Shift labels within each sub-sequence, mask boundaries
+        # shifted_labels[i] = input_ids[i+1] only if position i has loss in original labels
         shifted_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(buf_labels)
         offset = 0
         for seq_len in buf_seq_lens:
             for i in range(offset, offset + seq_len - 1):
-                if buf_labels[i + 1] != CROSS_ENTROPY_IGNORE_IDX:
+                if buf_labels[i] != CROSS_ENTROPY_IGNORE_IDX:
                     shifted_labels[i] = buf_ids[i + 1]
             # Last position of each sub-sequence: mask (can't predict next seq)
             offset += seq_len
