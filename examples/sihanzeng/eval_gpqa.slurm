@@ -11,28 +11,30 @@
 #SBATCH --gpus-per-node=8
 #SBATCH --exclusive
 #SBATCH --output=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/logs/gpqa_eval_%A_%a.log
-#SBATCH --array=0-1
+#SBATCH --array=0-5
 
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/vllm-v0.19.1-cu130.sqsh
 HF_MODEL=${MODEL_PATH:-/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it}
 DATA=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/eval/gpqa_diamond/test/gpqa_diamond.parquet
-RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_gpqa_direct
+RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_gpqa_v2
 SCRIPT=$HOME/Automodel/examples/sihanzeng/eval_gpqa.py
 
-# 0: thinking mode, 1: no-think mode
-declare -a THINK_FLAGS LABELS
-THINK_FLAGS[0]="--think"
-THINK_FLAGS[1]="--no-think --max_tokens 2048 --max_model_len 4096"
-LABELS[0]="think"
-LABELS[1]="nothink"
-
-FLAG=${THINK_FLAGS[$SLURM_ARRAY_TASK_ID]}
-LABEL=${LABELS[$SLURM_ARRAY_TASK_ID]}
+# 0-2: thinking mode (3 runs for variance), 3-5: no-think mode (3 runs)
+if [ $SLURM_ARRAY_TASK_ID -lt 3 ]; then
+    MODE="--think"
+    LABEL="think"
+    RUN_ID=$SLURM_ARRAY_TASK_ID
+    MAX_TOKENS="--max_tokens 31000 --max_model_len 32768"
+else
+    MODE="--no-think"
+    LABEL="nothink"
+    RUN_ID=$((SLURM_ARRAY_TASK_ID - 3))
+    MAX_TOKENS="--max_tokens 2048 --max_model_len 4096"
+fi
 
 mkdir -p $RESULTS_DIR
 
-echo "=== GPQA Diamond Direct Eval: $LABEL ==="
-echo "Model: $HF_MODEL"
+echo "=== GPQA Diamond: $LABEL run=$RUN_ID ==="
 echo "Node: $(hostname) | Job: ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "Start: $(date)"
 
@@ -44,13 +46,14 @@ srun --container-image=$CONTAINER \
 mkdir -p /tmp/hf_cache /tmp/xdg_cache /tmp/triton_cache
 export HF_HOME=/tmp/hf_cache XDG_CACHE_HOME=/tmp/xdg_cache TRITON_CACHE_DIR=/tmp/triton_cache PYTHONUNBUFFERED=1
 
-pip install pyarrow 2>&1 | tail -1
+pip install pyarrow -q 2>&1 | tail -1
 
 python3 $SCRIPT \
     --model $HF_MODEL \
     --data $DATA \
-    --dp 1 --tp 1 \
+    --tp 1 --dp 1 \
     --gpu_util 0.90 \
-    $FLAG \
-    --output $RESULTS_DIR/${LABEL}.jsonl 2>&1
+    --run_id $RUN_ID \
+    $MODE $MAX_TOKENS \
+    --output $RESULTS_DIR/${LABEL}_run${RUN_ID}.jsonl 2>&1
 "
