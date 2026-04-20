@@ -6,6 +6,7 @@ amaia-style zero-latency data pipeline:
 - Reservoir shuffle for approximate randomization with bounded memory
 - Outputs THD-format packed samples compatible with packed_sequence_thd_collater
 - Loss masking: only assistant turns contribute to loss (user/system masked to -100)
+- Samples exceeding max length are dropped, not truncated
 
 No upfront data loading. No offline packing pass. Near-zero startup latency.
 """
@@ -63,6 +64,8 @@ class StreamingPackedDataset(IterableDataset):
         self.message_key = message_key
         self.shuffle_buffer_size = shuffle_buffer_size
         self.drop_last = drop_last
+        self._drop_count = 0
+        self._total_count = 0
 
         datasets_list = []
         weights = []
@@ -92,12 +95,16 @@ class StreamingPackedDataset(IterableDataset):
         )
 
     def _convert_and_tokenize(self, sample):
-        """Convert dialog to (input_ids, labels) with assistant-only loss masking."""
+        """Convert dialog to (input_ids, labels) with assistant-only loss masking.
+
+        Uses keep_loss field from data if available, otherwise masks non-assistant turns.
+        Returns None if sample exceeds seq_length (drop, not truncate).
+        """
         dialog = sample.get("dialog", sample.get("conversations", []))
         keep_loss = sample.get("keep_loss", None)
 
         messages = []
-        roles = []
+        should_keep_loss = []
         for i, turn in enumerate(dialog):
             if isinstance(turn, dict):
                 role = turn.get("source", turn.get("role", turn.get("from", "user")))
@@ -110,15 +117,14 @@ class StreamingPackedDataset(IterableDataset):
                 if role in ("user", "assistant", "system") and content:
                     messages.append({"role": role, "content": content})
                     if keep_loss is not None and i < len(keep_loss):
-                        roles.append("assistant" if keep_loss[i] else role)
+                        should_keep_loss.append(bool(keep_loss[i]))
                     else:
-                        roles.append(role)
+                        should_keep_loss.append(role == "assistant")
 
         if len(messages) < 2:
             return None
 
         try:
-            # Tokenize each turn incrementally to find token boundaries
             input_ids = []
             labels = []
             for i in range(len(messages)):
@@ -138,7 +144,7 @@ class StreamingPackedDataset(IterableDataset):
 
                 turn_ids = full_ids[len(prefix_ids):]
 
-                if roles[i] == "assistant":
+                if should_keep_loss[i]:
                     turn_labels = list(turn_ids)
                 else:
                     turn_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(turn_ids)
@@ -146,9 +152,16 @@ class StreamingPackedDataset(IterableDataset):
                 input_ids.extend(turn_ids)
                 labels.extend(turn_labels)
 
+            self._total_count += 1
+
             if len(input_ids) > self.seq_length:
-                input_ids = input_ids[:self.seq_length]
-                labels = labels[:self.seq_length]
+                self._drop_count += 1
+                if self._drop_count % 1000 == 1:
+                    logger.info(
+                        f"Dropped {self._drop_count}/{self._total_count} samples "
+                        f"exceeding {self.seq_length} tokens (this one: {len(input_ids)})"
+                    )
+                return None
 
             if len(input_ids) < 2:
                 return None
@@ -176,11 +189,6 @@ class StreamingPackedDataset(IterableDataset):
 
         for input_ids, labels in self._tokenized_stream():
             seq_len = len(input_ids)
-
-            if seq_len > pack_size:
-                input_ids = input_ids[:pack_size]
-                labels = labels[:pack_size]
-                seq_len = pack_size
 
             space_left = pack_size - len(buf_ids)
 
@@ -227,6 +235,8 @@ class StreamingPackedDataset(IterableDataset):
 
     def __iter__(self):
         """Yields packed samples with optional reservoir shuffle."""
+        self._drop_count = 0
+        self._total_count = 0
         packing_iter = self._packing_stream()
 
         if self.shuffle_buffer_size <= 0:

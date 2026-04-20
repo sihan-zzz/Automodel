@@ -19,7 +19,7 @@
 CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo-20260401.sqsh
 AUTOMODEL_DIR=$HOME/Automodel
 SCRIPTS_DIR=$AUTOMODEL_DIR/examples/sihanzeng
-CONFIG_FILE=${CONFIG:-gemma4_26b_sft_packed_4node.yaml}
+CONFIG_FILE=${CONFIG:-gemma4_26b_sft_packed.yaml}
 CONFIG=$SCRIPTS_DIR/$CONFIG_FILE
 
 # Rendezvous for multi-node torchrun
