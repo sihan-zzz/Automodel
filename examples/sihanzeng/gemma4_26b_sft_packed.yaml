@@ -1,6 +1,5 @@
-# Gemma4 26B-A4B-it MoE SFT — Step3.5 (0.5) + JackRong SFT (0.5)
-# Unpacked streaming: each sample is one conversation (no packing)
-# lr=2e-6 cosine decay, 4 nodes, assistant-only loss masking
+# Gemma4 26B-A4B-it MoE SFT — Tulu3 only via streaming reader
+# Unpacked, apply_chat_template, lr=2e-6 cosine, 4 nodes
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
@@ -41,7 +40,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_unpacked/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_tulu3_stream/
   model_save_format: safetensors
   save_consolidated: true
 
@@ -60,11 +59,9 @@ loss_fn:
 dataset:
   _target_: streaming_packed_dataset.StreamingUnpackedDataset
   sources:
-    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/step_3p5_flash_sft
-      weight: 0.5
-    - path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/jackrong_sft
-      weight: 0.5
-  seq_length: 16384
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
+      weight: 1.0
+  seq_length: 8192
   shuffle_buffer_size: 256
   split: train
 
