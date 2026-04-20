@@ -93,6 +93,8 @@ class StreamingPackedDataset(IterableDataset):
             seed=seed,
             stopping_strategy="all_exhausted",
         )
+        # Expose for split_dataset_by_node sharding in build_dataloader
+        self.dataset = self.blended
 
     def _build_gemma4_text(self, turns, roles):
         """Build Gemma4 chat format manually to preserve <think> tags.
