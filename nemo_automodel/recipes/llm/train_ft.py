@@ -730,18 +730,19 @@ def build_lr_scheduler(cfg, optimizer, step_scheduler) -> list[OptimizerParamSch
         return None
 
     # Calculate total steps for the training run
-    total_epochs = step_scheduler.num_epochs
-    epoch_len = len(step_scheduler.dataloader)
-    grad_acc_steps = step_scheduler.grad_acc_steps
-
-    # Total optimizer steps (accounting for gradient accumulation)
-    total_steps = (total_epochs * epoch_len) // grad_acc_steps
-    if step_scheduler.max_steps is not None:
-        total_steps = min(total_steps, step_scheduler.max_steps)
+    user_kwargs = cfg.to_dict()
+    if "lr_decay_steps" in user_kwargs:
+        total_steps = user_kwargs["lr_decay_steps"]
+    else:
+        total_epochs = step_scheduler.num_epochs
+        epoch_len = len(step_scheduler.dataloader)
+        grad_acc_steps = step_scheduler.grad_acc_steps
+        total_steps = (total_epochs * epoch_len) // grad_acc_steps
+        if step_scheduler.max_steps is not None:
+            total_steps = min(total_steps, step_scheduler.max_steps)
 
     # Set defaults for scheduler parameters
     optimizer_param_schedulers = []
-    user_kwargs = cfg.to_dict()
     default_kwargs = dict(
         lr_warmup_steps=min(1000, total_steps // 10),  # 10% warmup or max 1000 steps
         lr_decay_steps=total_steps,
