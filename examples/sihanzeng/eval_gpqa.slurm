@@ -49,7 +49,7 @@ pip install pyarrow 2>&1 | tail -1
 python3 $SCRIPT \
     --model $HF_MODEL \
     --data $DATA \
-    --dp 8 --tp 1 \
+    --dp 1 --tp 1 \
     --gpu_util 0.90 \
     $FLAG \
     --output $RESULTS_DIR/${LABEL}.jsonl 2>&1

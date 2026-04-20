@@ -121,14 +121,16 @@ def main():
     # Load vLLM
     from vllm import LLM, SamplingParams
 
-    llm = LLM(
+    llm_kwargs = dict(
         model=args.model,
         dtype="bfloat16",
         tensor_parallel_size=args.tp,
-        data_parallel_size=args.dp,
         gpu_memory_utilization=args.gpu_util,
         max_model_len=args.max_model_len,
     )
+    if args.dp > 1:
+        llm_kwargs["data_parallel_size"] = args.dp
+    llm = LLM(**llm_kwargs)
 
     if args.greedy:
         sp = SamplingParams(max_tokens=args.max_tokens, temperature=0)
