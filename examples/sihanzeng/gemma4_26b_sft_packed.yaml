@@ -22,7 +22,7 @@ rng:
 
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
+  pretrained_model_name_or_path: /tmp/gemma4_model
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager

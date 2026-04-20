@@ -47,22 +47,18 @@ echo "Master: $MASTER_ADDR:$MASTER_PORT"
 echo "Nodes: $(scontrol show hostnames $SLURM_JOB_NODELIST | tr '\n' ' ')"
 
 # Copy model from Lustre to local NVMe on each node for faster loading
-LOCAL_MODEL=/tmp/gemma4_model
+# Config YAML points to /tmp/gemma4_model (set in gemma4_26b_sft_packed.yaml)
 LUSTRE_MODEL=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
 
 echo "Copying model to local disk on each node..."
 START_COPY=$(date +%s)
 srun --ntasks-per-node=1 bash -c "
-  mkdir -p $LOCAL_MODEL
-  cp -r $LUSTRE_MODEL/* $LOCAL_MODEL/
+  mkdir -p /tmp/gemma4_model
+  cp -r $LUSTRE_MODEL/* /tmp/gemma4_model/
   echo \"\$(hostname): copy done\"
 "
 END_COPY=$(date +%s)
 echo "Model copy took $(( END_COPY - START_COPY ))s"
-
-# Create config with local model path (on Lustre so all nodes see it)
-LOCAL_CONFIG=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/tmp_config_${SLURM_JOB_ID}.yaml
-sed "s|pretrained_model_name_or_path:.*|pretrained_model_name_or_path: $LOCAL_MODEL|" $CONFIG > $LOCAL_CONFIG
 
 srun --container-image=$CONTAINER \
      --container-mounts=/mnt/lustre/metavmds0lstre:/mnt/lustre/metavmds0lstre \
@@ -77,8 +73,5 @@ torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     --rdzv_id=$SLURM_JOB_ID \
-    nemo_automodel/recipes/llm/train_ft.py -c $LOCAL_CONFIG
+    nemo_automodel/recipes/llm/train_ft.py -c $CONFIG
 "
-
-# Cleanup temp config
-rm -f $LOCAL_CONFIG
