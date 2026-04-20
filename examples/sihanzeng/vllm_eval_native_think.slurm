@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gpqa_native
+#SBATCH --job-name=lf_bench
 #SBATCH --account=ads_cpt
 #SBATCH --partition=a4
 #SBATCH --qos=ads_cpt
@@ -68,6 +68,8 @@ echo 'Starting: $TASK'
 echo 'Gen start: '\$(date)
 
 LAUNCHER=\$HOME/Automodel/examples/sihanzeng/vllm_eval_launcher_minimal.py
+LIMIT_FLAG=''
+if [ $LIMIT -gt 0 ]; then LIMIT_FLAG='--limit $LIMIT'; fi
 python3 \$LAUNCHER --model vllm \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
     --tasks $TASK \
@@ -77,8 +79,7 @@ python3 \$LAUNCHER --model vllm \
     --fewshot_as_multiturn \
     --include_path $TASK_DIR \
     --output_path $RESULTS_DIR/$LABEL \
-    \$([ $LIMIT -gt 0 ] && echo "--limit $LIMIT") \
-    --log_samples 2>&1
+    --log_samples \$LIMIT_FLAG 2>&1
 
 echo ''
 echo '=== Done: $LABEL at '\$(date)' ==='
