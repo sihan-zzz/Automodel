@@ -61,7 +61,7 @@ END_COPY=$(date +%s)
 echo "Model copy took $(( END_COPY - START_COPY ))s"
 
 srun --container-image=$CONTAINER \
-     --container-mounts=/mnt/lustre/metavmds0lstre:/mnt/lustre/metavmds0lstre \
+     --container-mounts=/mnt/lustre/metavmds0lstre:/mnt/lustre/metavmds0lstre,/tmp/gemma4_model:/tmp/gemma4_model \
      --container-env=FLASHINFER_WORKSPACE_DIR,HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED,NCCL_DEBUG,CUDA_DEVICE_MAX_CONNECTIONS,PYTHONPATH,TORCH_NCCL_TRACE_BUFFER_SIZE,NCCL_IB_TIMEOUT,NCCL_SOCKET_TIMEOUT,TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC \
      --container-mount-home \
      bash -c "
