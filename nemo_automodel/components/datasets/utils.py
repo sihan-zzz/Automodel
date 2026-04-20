@@ -376,6 +376,14 @@ def packed_sequence_thd_collater(batch):
     }
 
 
+def default_collater_with_mm(batch, pad_token_ids=None, pad_seq_len_divisible=None):
+    """default_collater + mm_token_type_ids (zeros) for Gemma4 text-only SFT."""
+    result = default_collater(batch, pad_token_ids=pad_token_ids, pad_seq_len_divisible=pad_seq_len_divisible)
+    if "input_ids" in result:
+        result["mm_token_type_ids"] = torch.zeros_like(result["input_ids"])
+    return result
+
+
 def _indexed_mask_to_4d_block_causal(attention_mask: torch.Tensor) -> torch.Tensor:
     """Convert an indexed attention mask to a 4D block-causal mask.
 
