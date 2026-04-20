@@ -26,9 +26,9 @@ export PYTHONUNBUFFERED=1
 
 # Thinking-mode eval: generative with reasoning
 declare -a TASKS LABELS
-TASKS[0]="gpqa_thinking"
+TASKS[0]="gpqa_diamond_thinking"
 TASKS[1]="mmlu_thinking"
-LABELS[0]="gpqa_thinking"
+LABELS[0]="gpqa_diamond"
 LABELS[1]="mmlu_thinking"
 
 TASK=${TASKS[$SLURM_ARRAY_TASK_ID]}
@@ -63,12 +63,14 @@ python3 -c 'import lm_eval; print(f\"lm-eval {lm_eval.__version__}\")' 2>&1
 echo ''
 echo 'Starting: $TASK (thinking mode, vLLM DP=8, max_gen_toks=8192)'
 
-# No --apply_chat_template or --gen_kwargs: handled in task YAML
+# apply_chat_template with enable_thinking for proper special token handling
 python3 $LAUNCHER --model vllm \
     --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enforce_eager=True \
     --tasks $TASK \
     --batch_size 64 \
     --num_fewshot 0 \
+    --apply_chat_template \
+    --fewshot_as_multiturn \
     --include_path $TASK_DIR \
     --output_path $RESULTS_DIR/$LABEL \
     --log_samples 2>&1
