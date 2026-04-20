@@ -1,16 +1,17 @@
 # Gemma4 26B-A4B-it MoE SFT — Step3.5 (0.5) + JackRong SFT (0.5)
 # 16k packed sequences, 4 nodes, assistant-only loss masking
 # Samples > 16k are dropped (not truncated)
+# lr=2e-6 cosine decay, global_bs=128 (grad_acc=4) for stable training
 
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 
 step_scheduler:
-  global_batch_size: 32
+  global_batch_size: 128
   local_batch_size: 1
-  ckpt_every_steps: 500
+  ckpt_every_steps: 50
   val_every_steps: 500
   num_epochs: 1
-  max_steps: 500
+  max_steps: 200
 
 dist_env:
   backend: nccl
@@ -41,7 +42,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_cosine/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_bs128/
   model_save_format: safetensors
   save_consolidated: true
 
@@ -83,12 +84,12 @@ dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 5e-6
+  lr: 2e-6
   weight_decay: 0.01
   betas: [0.9, 0.95]
 
 lr_scheduler:
-  lr_warmup_steps: 50
-  lr_decay_steps: 500
+  lr_warmup_steps: 20
+  lr_decay_steps: 200
   lr_decay_style: cosine
-  min_lr: 5e-7
+  min_lr: 2e-7
