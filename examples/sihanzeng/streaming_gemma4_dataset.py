@@ -74,19 +74,28 @@ def _convert_think_to_gemma4_native(content: str) -> str:
     return re.sub(r"<think>(.*?)</think>", replace_think, content, flags=re.DOTALL)
 
 
-def convert_messages_for_gemma4(messages: list[dict]) -> list[dict]:
+def convert_messages_for_gemma4(
+    messages: list[dict],
+    add_empty_thinking: bool = False,
+) -> list[dict]:
     """Convert messages to use Gemma4 native thinking format.
 
     For assistant messages containing <think> tags, converts to
     <|channel>thought format. Other messages pass through unchanged.
+
+    If add_empty_thinking=True, prepends an empty thinking block
+    to assistant messages without <think> tags, preserving the
+    model's thinking capability format.
     """
     converted = []
     for msg in messages:
-        if msg["role"] == "assistant" and "<think>" in msg["content"]:
-            converted.append({
-                "role": msg["role"],
-                "content": _convert_think_to_gemma4_native(msg["content"]),
-            })
+        if msg["role"] == "assistant":
+            content = msg["content"]
+            if "<think>" in content:
+                content = _convert_think_to_gemma4_native(content)
+            elif add_empty_thinking:
+                content = f"<|channel>thought\n<channel|>{content}"
+            converted.append({"role": msg["role"], "content": content})
         else:
             converted.append(msg)
     return converted
@@ -169,6 +178,7 @@ class StreamingGemma4Dataset(IterableDataset):
         seed: int = 42,
         shuffle_buffer_size: int = 256,
         convert_thinking: bool = True,
+        add_empty_thinking: bool = False,
         split: Optional[str] = None,
         **kwargs,
     ):
@@ -177,6 +187,7 @@ class StreamingGemma4Dataset(IterableDataset):
         self.seed = seed
         self.shuffle_buffer_size = shuffle_buffer_size
         self.convert_thinking = convert_thinking
+        self.add_empty_thinking = add_empty_thinking
         self._drop_count = 0
         self._total_count = 0
 
@@ -217,8 +228,10 @@ class StreamingGemma4Dataset(IterableDataset):
             return None
         messages, loss_flags = parsed
 
-        if self.convert_thinking:
-            messages = convert_messages_for_gemma4(messages)
+        if self.convert_thinking or self.add_empty_thinking:
+            messages = convert_messages_for_gemma4(
+                messages, add_empty_thinking=self.add_empty_thinking,
+            )
 
         self._total_count += 1
         result = tokenize_with_loss_mask(
