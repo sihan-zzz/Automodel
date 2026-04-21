@@ -265,10 +265,16 @@ class StreamingGemma4Dataset(IterableDataset):
                 if result is not None:
                     input_ids, labels = result
                     assert len(input_ids) == len(labels), f"len mismatch: {len(input_ids)} vs {len(labels)}"
+                    pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
                     yield {
                         "input_ids": input_ids,
                         "labels": labels,
-                        "mm_token_type_ids": [0] * len(input_ids),
+                        "attention_mask": [1] * len(input_ids),
+                        "___PAD_TOKEN_IDS___": {
+                            "input_ids": pad_token_id,
+                            "labels": -100,
+                            "attention_mask": 0,
+                        },
                     }
 
         stream = sample_stream()
