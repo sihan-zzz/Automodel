@@ -183,10 +183,18 @@ class Gemma4NeMoAttention(nn.Module):
         # masking internally. HF's 4D causal mask is incompatible with TE.
         # Forward cu_seqlens from packed sequences if present.
         te_kwargs = {}
+        use_thd = False
         for k_name in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv"):
             if k_name in kwargs:
                 te_kwargs[k_name] = kwargs[k_name]
+                use_thd = True
         te_kwargs["window_size"] = (self.sliding_window, 0) if self.sliding_window else (-1, 0)
+
+        # THD format requires 3D tensors [total_tokens, heads, dim]
+        if use_thd:
+            q = q.reshape(-1, self.num_heads, self.head_dim)
+            k = k.reshape(-1, self.num_kv_heads, self.head_dim)
+            v = v.reshape(-1, self.num_kv_heads, self.head_dim)
 
         q, k, v, attn_kwargs = preprocess_args_and_kwargs_for_attn(
             q, k, v, None, self.backend.attn, **te_kwargs,
@@ -194,7 +202,13 @@ class Gemma4NeMoAttention(nn.Module):
         out = self.attn_func(q, k, v, **attn_kwargs)
         out = postprocess_output_for_attn(out, self.backend.attn)
 
-        out = self.o_proj(out.flatten(2))
+        # Reshape back from THD [total_tokens, heads, dim] → [B, S, heads*dim]
+        if use_thd:
+            out = out.reshape(bsz, seqlen, -1)
+        else:
+            out = out.flatten(2)
+
+        out = self.o_proj(out)
         return out, None
 
     def init_weights(self, buffer_device: torch.device, init_std: float = 0.02):
