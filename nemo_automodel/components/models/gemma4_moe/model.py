@@ -179,36 +179,35 @@ class Gemma4NeMoAttention(nn.Module):
         q = (q * cos_u) + (_rotate_half(q) * sin_u)
         k = (k * cos_u) + (_rotate_half(k) * sin_u)
 
-        # TE attention — pass None for attention_mask since TE handles causal
-        # masking internally. HF's 4D causal mask is incompatible with TE.
-        # Forward cu_seqlens from packed sequences if present.
-        te_kwargs = {}
-        use_thd = False
-        for k_name in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv"):
-            if k_name in kwargs:
-                te_kwargs[k_name] = kwargs[k_name]
-                use_thd = True
-        te_kwargs["window_size"] = (self.sliding_window, 0) if self.sliding_window else (-1, 0)
-
-        # THD format requires 3D tensors [total_tokens, heads, dim]
-        if use_thd:
-            q = q.reshape(-1, self.num_heads, self.head_dim)
-            k = k.reshape(-1, self.num_kv_heads, self.head_dim)
-            v = v.reshape(-1, self.num_kv_heads, self.head_dim)
-
-        q, k, v, attn_kwargs = preprocess_args_and_kwargs_for_attn(
-            q, k, v, None, self.backend.attn, **te_kwargs,
-        )
-        out = self.attn_func(q, k, v, **attn_kwargs)
-        out = postprocess_output_for_attn(out, self.backend.attn)
-
-        # Reshape back from THD [total_tokens, heads, dim] → [B, S, heads*dim]
-        if use_thd:
-            out = out.reshape(bsz, seqlen, -1)
+        # For packed sequences with block-diagonal mask, use SDPA directly
+        # (TE's fused kernels don't support head_dim=512 with THD/cu_seqlens).
+        # For unpacked sequences, use TE attention with causal masking.
+        if attention_mask is not None and attention_mask.dim() == 4:
+            # Packed sequence: use F.scaled_dot_product_attention with 4D mask
+            # q,k,v: [B, S, H, D] → [B, H, S, D] for SDPA
+            q_sdpa = q.transpose(1, 2)
+            k_sdpa = k.transpose(1, 2)
+            v_sdpa = v.transpose(1, 2)
+            # Expand mask for GQA: [B, 1, S, S] broadcasts over heads
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q_sdpa, k_sdpa, v_sdpa, attn_mask=attention_mask, is_causal=False,
+            )
+            out = out.transpose(1, 2).contiguous()  # [B, S, H, D]
         else:
-            out = out.flatten(2)
+            # Unpacked: use TE attention with implicit causal masking
+            te_kwargs = {}
+            for k_name in ("cu_seqlens", "cu_seqlens_padded", "max_seqlen", "cu_seqlens_q", "cu_seqlens_kv"):
+                if k_name in kwargs:
+                    te_kwargs[k_name] = kwargs[k_name]
+            te_kwargs["window_size"] = (self.sliding_window, 0) if self.sliding_window else (-1, 0)
 
-        out = self.o_proj(out)
+            q, k, v, attn_kwargs = preprocess_args_and_kwargs_for_attn(
+                q, k, v, None, self.backend.attn, **te_kwargs,
+            )
+            out = self.attn_func(q, k, v, **attn_kwargs)
+            out = postprocess_output_for_attn(out, self.backend.attn)
+
+        out = self.o_proj(out.flatten(2))
         return out, None
 
     def init_weights(self, buffer_device: torch.device, init_std: float = 0.02):
@@ -498,30 +497,40 @@ class Gemma4MoETextModelBackend(nn.Module):
 
         hidden_states = inputs_embeds
 
-        # Build cu_seqlens from EOS tokens for packed sequence support.
-        # When cu_seqlens is present, TE attention uses block-diagonal causal
-        # masking (each document attends only to itself), enabling efficient
-        # sequence packing without cross-document attention contamination.
-        if "cu_seqlens" not in kwargs and "seq_lens" in kwargs:
-            # Convert seq_lens (from packed_sequence_thd_collater) to cu_seqlens
-            seq_lens = kwargs.pop("seq_lens")
-            if isinstance(seq_lens, torch.Tensor):
-                # Filter out padding sentinel values (-1000)
-                flat = seq_lens.flatten()
-                flat = flat[flat > 0]
-                cu = torch.zeros(len(flat) + 1, dtype=torch.int32, device=inputs_embeds.device)
-                cu[1:] = flat.cumsum(0)
-                kwargs["cu_seqlens"] = cu
-                kwargs["max_seqlen"] = flat.max().item()
-
-        use_cu_seqlens = "cu_seqlens" in kwargs
-
-        if use_cu_seqlens:
-            # TE handles masking via cu_seqlens; skip expensive HF 4D mask computation
-            causal_mask_mapping = {
-                "full_attention": None,
-                "sliding_attention": None,
-            }
+        # Build block-diagonal causal mask from seq_lens for packed sequences.
+        # This enables sequence packing without cross-document attention.
+        # Uses a 4D mask compatible with eager/sdpa attention (needed for
+        # Gemma4's head_dim=512 which exceeds flash-attn/TE-fused limits).
+        has_packed_seqlens = "seq_lens" in kwargs
+        if has_packed_seqlens:
+            seq_lens_tensor = kwargs.pop("seq_lens")
+            kwargs.pop("seq_lens_padded", None)
+            kwargs.pop("qkv_format", None)
+            if isinstance(seq_lens_tensor, torch.Tensor):
+                # Build per-sample block-diagonal causal masks
+                bsz, total_len = inputs_embeds.shape[:2]
+                block_masks = []
+                for b in range(bsz):
+                    slens = seq_lens_tensor[b]
+                    slens = slens[slens > 0]  # filter sentinel -1000
+                    blocks = []
+                    for sl in slens:
+                        sl = int(sl.item())
+                        blocks.append(torch.ones(sl, sl, dtype=torch.bool, device=inputs_embeds.device).tril())
+                    mask_2d = torch.block_diag(*blocks)
+                    # Pad to total_len if needed
+                    if mask_2d.shape[0] < total_len:
+                        pad = total_len - mask_2d.shape[0]
+                        mask_2d = torch.nn.functional.pad(mask_2d, (0, pad, 0, pad), value=False)
+                    block_masks.append(mask_2d)
+                # [B, 1, S, S] — compatible with HF attention
+                block_diag_mask = torch.stack(block_masks).unsqueeze(1)
+                # Convert bool mask to float mask (True=attend, False=masked)
+                attn_mask_float = torch.where(block_diag_mask, 0.0, float("-inf")).to(inputs_embeds.dtype)
+                causal_mask_mapping = {
+                    "full_attention": attn_mask_float,
+                    "sliding_attention": attn_mask_float,  # block-diag is stricter than sliding window
+                }
         elif getattr(self.config, "use_bidirectional_attention", None) == "vision":
             # Build causal masks. When use_bidirectional_attention == "vision" (e.g.
             # gemma-4-26B-A4B, gemma-4-31B), HF uses create_causal_mask_mapping to
