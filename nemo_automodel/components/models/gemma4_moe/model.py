@@ -484,12 +484,36 @@ class Gemma4MoETextModelBackend(nn.Module):
 
         hidden_states = inputs_embeds
 
-        # Build causal masks. When use_bidirectional_attention == "vision" (e.g.
-        # gemma-4-26B-A4B, gemma-4-31B), HF uses create_causal_mask_mapping to
-        # build a vision-aware mask where tokens inside the same vision group
-        # attend to each other bidirectionally (not just causally). Missing this
-        # logic causes gen_kl_error to be ~10x higher on multimodal inputs.
-        if getattr(self.config, "use_bidirectional_attention", None) == "vision":
+        # Build cu_seqlens from EOS tokens for packed sequence support.
+        # When cu_seqlens is present, TE attention uses block-diagonal causal
+        # masking (each document attends only to itself), enabling efficient
+        # sequence packing without cross-document attention contamination.
+        if "cu_seqlens" not in kwargs and "seq_lens" in kwargs:
+            # Convert seq_lens (from packed_sequence_thd_collater) to cu_seqlens
+            seq_lens = kwargs.pop("seq_lens")
+            if isinstance(seq_lens, torch.Tensor):
+                # Filter out padding sentinel values (-1000)
+                flat = seq_lens.flatten()
+                flat = flat[flat > 0]
+                cu = torch.zeros(len(flat) + 1, dtype=torch.int32, device=inputs_embeds.device)
+                cu[1:] = flat.cumsum(0)
+                kwargs["cu_seqlens"] = cu
+                kwargs["max_seqlen"] = flat.max().item()
+
+        use_cu_seqlens = "cu_seqlens" in kwargs
+
+        if use_cu_seqlens:
+            # TE handles masking via cu_seqlens; skip expensive HF 4D mask computation
+            causal_mask_mapping = {
+                "full_attention": None,
+                "sliding_attention": None,
+            }
+        elif getattr(self.config, "use_bidirectional_attention", None) == "vision":
+            # Build causal masks. When use_bidirectional_attention == "vision" (e.g.
+            # gemma-4-26B-A4B, gemma-4-31B), HF uses create_causal_mask_mapping to
+            # build a vision-aware mask where tokens inside the same vision group
+            # attend to each other bidirectionally (not just causally). Missing this
+            # logic causes gen_kl_error to be ~10x higher on multimodal inputs.
             from transformers.models.gemma4.modeling_gemma4 import create_causal_mask_mapping
 
             causal_mask_mapping = create_causal_mask_mapping(
@@ -517,6 +541,10 @@ class Gemma4MoETextModelBackend(nn.Module):
                 "full_attention": create_causal_mask(**mask_kwargs),
                 "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
             }
+
+        # Remove collater metadata keys before passing to decoder layers
+        kwargs.pop("seq_lens_padded", None)
+        kwargs.pop("qkv_format", None)
 
         position_embeddings = {}
         for layer_type in set(self.config.layer_types):
