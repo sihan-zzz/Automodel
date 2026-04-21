@@ -71,7 +71,7 @@ packed_sequence:
 
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
-  collate_fn: nemo_automodel.components.datasets.utils.packed_sequence_thd_collater
+  collate_fn: nemo_automodel.components.datasets.utils.packed_thd_collater_with_mm
   shuffle: true
   num_workers: 0
 

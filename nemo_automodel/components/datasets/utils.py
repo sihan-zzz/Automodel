@@ -384,6 +384,14 @@ def default_collater_with_mm(batch, **kwargs):
     return result
 
 
+def packed_thd_collater_with_mm(batch):
+    """packed_sequence_thd_collater + mm_token_type_ids (zeros) for Gemma4."""
+    result = packed_sequence_thd_collater(batch)
+    if "input_ids" in result:
+        result["mm_token_type_ids"] = torch.zeros_like(result["input_ids"])
+    return result
+
+
 def _indexed_mask_to_4d_block_causal(attention_mask: torch.Tensor) -> torch.Tensor:
     """Convert an indexed attention mask to a 4D block-causal mask.
 
