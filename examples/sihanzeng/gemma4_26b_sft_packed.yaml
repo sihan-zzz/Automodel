@@ -22,7 +22,7 @@ rng:
 
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  pretrained_model_name_or_path: /tmp/gemma4_model
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -40,7 +40,7 @@ model:
 
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_tulu3_stream/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_chatds_200/
   model_save_format: safetensors
   save_consolidated: true
 
@@ -57,13 +57,12 @@ loss_fn:
   _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
 
 dataset:
-  _target_: streaming_packed_dataset.StreamingUnpackedDataset
-  sources:
-    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
-      weight: 1.0
-  seq_length: 8192
-  shuffle_buffer_size: 256
+  _target_: nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset
+  path_or_dataset_id: allenai/tulu-3-sft-mixture
   split: train
+  seq_length: 8192
+  padding: do_not_pad
+  shuffle_seed: 42
 
 packed_sequence:
   packed_sequence_size: 0
@@ -71,10 +70,8 @@ packed_sequence:
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
-  num_workers: 4
-  prefetch_factor: 10
-  pin_memory: true
-  persistent_workers: true
+  shuffle: true
+  num_workers: 0
 
 optimizer:
   _target_: torch.optim.AdamW
