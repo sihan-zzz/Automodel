@@ -230,8 +230,11 @@ class StreamingGemma4Dataset(IterableDataset):
             seed=seed,
             stopping_strategy="all_exhausted",
         )
-        # Expose for split_dataset_by_node sharding in build_dataloader
-        self.dataset = self.blended
+        # NOTE: we do NOT expose self.dataset for split_dataset_by_node.
+        # Instead we implement amaia-style line-level interleaving in __iter__
+        # via sample_idx % world_size == rank, which gives even distribution
+        # regardless of file sizes. See _get_dp_info().
+        self._datasets_list = datasets_list
 
     def _process_sample(self, sample):
         """Convert raw sample to (input_ids, labels) or None."""
@@ -256,12 +259,27 @@ class StreamingGemma4Dataset(IterableDataset):
             return None
         return result
 
+    @staticmethod
+    def _get_dp_info():
+        """Get DP rank and world size for line-level sharding."""
+        try:
+            import torch.distributed as dist
+            if dist.is_initialized():
+                return dist.get_rank(), dist.get_world_size()
+        except Exception:
+            pass
+        return 0, 1
+
     def __iter__(self):
         self._drop_count = 0
         self._total_count = 0
+        dp_rank, dp_world_size = self._get_dp_info()
 
         def sample_stream():
-            for sample in self.blended:
+            # amaia-style line-level interleaving: each rank keeps every Nth sample
+            for idx, sample in enumerate(self.blended):
+                if idx % dp_world_size != dp_rank:
+                    continue
                 result = self._process_sample(sample)
                 if result is not None:
                     input_ids, labels = result
