@@ -215,6 +215,7 @@ class StreamingGemma4Dataset(IterableDataset):
                 streaming=True,
                 verification_mode=VerificationMode.NO_CHECKS,
             )
+            ds = ds.shuffle(seed=seed, buffer_size=10000)
             datasets_list.append(ds)
             weights.append(weight)
 
