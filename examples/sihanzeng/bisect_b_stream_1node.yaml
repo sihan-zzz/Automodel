@@ -1,0 +1,63 @@
+recipe: TrainFinetuneRecipeForNextTokenPrediction
+step_scheduler:
+  global_batch_size: 16
+  local_batch_size: 2
+  ckpt_every_steps: 500
+  val_every_steps: 500
+  num_epochs: 1
+  max_steps: 50
+dist_env:
+  backend: nccl
+  timeout_minutes: 30
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 42
+  ranked: true
+model:
+  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
+  torch_dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: eager
+  backend:
+    _target_: nemo_automodel.components.models.common.BackendConfig
+    attn: te
+    linear: te
+    rms_norm: te
+    rope_fusion: true
+    experts: torch_mm
+    dispatcher: deepep
+    fake_balanced_gate: false
+    enable_hf_state_dict_adapter: true
+    enable_fsdp_optimizations: true
+checkpoint:
+  enabled: false
+distributed:
+  strategy: fsdp2
+  tp_size: 1
+  cp_size: 1
+  pp_size: 1
+  ep_size: 8
+  sequence_parallel: false
+  activation_checkpointing: true
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+dataset:
+  _target_: streaming_gemma4_dataset.StreamingGemma4Dataset
+  sources:
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
+      weight: 1.0
+  seq_length: 8192
+  shuffle_buffer_size: 256
+  convert_thinking: false
+packed_sequence:
+  packed_sequence_size: 0
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
+  num_workers: 0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 2e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
