@@ -33,7 +33,7 @@ model:
     enable_fsdp_optimizations: true
 checkpoint:
   enabled: true
-  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_step35_8k/
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_sft_step35_v2/
   model_save_format: safetensors
   save_consolidated: true
 distributed:
