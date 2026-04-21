@@ -315,12 +315,15 @@ class _BaseNeMoAutoModelClass(_BaseAutoModelClass):
             )
 
         if is_hf_model:
+            backend = kwargs.get("backend", None)
+            backend_attn = getattr(backend, "attn", None) if backend is not None else None
             attn_implementation, use_liger_kernel = _apply_preload_overrides(
                 mesh.tp_size,
                 mesh.cp_size,
                 has_packed_sequence,
                 attn_implementation,
                 use_liger_kernel,
+                backend_attn=backend_attn,
             )
         device = torch.cuda.current_device()
 

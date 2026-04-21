@@ -209,7 +209,7 @@ def _get_next_fallback_attn(attn_implementation: str) -> str:
         return priorities[0]
 
 
-def _apply_preload_overrides(tp_size, cp_size, has_packed_sequence, attn_implementation, use_liger_kernel):
+def _apply_preload_overrides(tp_size, cp_size, has_packed_sequence, attn_implementation, use_liger_kernel, backend_attn=None):
     """
     Compute final attention implementation and liger-kernel flag based on TP/CP and packed sequence constraints.
     """
@@ -222,7 +222,11 @@ def _apply_preload_overrides(tp_size, cp_size, has_packed_sequence, attn_impleme
         logger.warning("Packed sequence is supported only with SDPA. Setting model's attn_implementation to sdpa")
 
     if has_packed_sequence:
-        if cp_size == 1:
+        if backend_attn == "te":
+            # TE attention handles THD format natively via cu_seqlens;
+            # no need to force FA2 (which crashes on head_dim > 256)
+            logger.info("Packed sequence with TE backend: skipping FA2 override")
+        elif cp_size == 1:
             assert HAS_FA, "Flash Attention is not available"
             attn_implementation = "flash_attention_2"
             logger.warning(
