@@ -109,48 +109,59 @@ def tokenize_with_loss_mask(
 ) -> tuple[list[int], list[int]] | None:
     """Tokenize messages with per-turn loss masking and label shifting.
 
-    Uses incremental apply_chat_template to find turn boundaries.
+    Uses single apply_chat_template(tokenize=True) call matching ChatDataset,
+    then builds assistant mask via incremental prefix matching.
     Returns (input_ids, shifted_labels) or None if too long/short.
     """
     try:
-        input_ids = []
-        labels = []
-
-        for i in range(len(messages)):
-            prefix = tokenizer.apply_chat_template(
-                messages[:i], tokenize=False, add_generation_prompt=False,
-            ) if i > 0 else ""
-            full = tokenizer.apply_chat_template(
-                messages[:i + 1], tokenize=False, add_generation_prompt=False,
-            )
-
-            prefix_ids = tokenizer(
-                prefix, truncation=False, padding=False, return_tensors=None,
-            )["input_ids"] if prefix else []
-            full_ids = tokenizer(
-                full, truncation=False, padding=False, return_tensors=None,
-            )["input_ids"]
-
-            turn_ids = full_ids[len(prefix_ids):]
-
-            if loss_flags[i]:
-                turn_labels = list(turn_ids)
-            else:
-                turn_labels = [CROSS_ENTROPY_IGNORE_IDX] * len(turn_ids)
-
-            input_ids.extend(turn_ids)
-            labels.extend(turn_labels)
+        # Single tokenize call — matches ChatDataset's format_chat_template
+        tokenized = tokenizer.apply_chat_template(
+            messages, tokenize=True, return_dict=True,
+            add_generation_prompt=False,
+        )
+        input_ids = list(tokenized["input_ids"])
 
         if len(input_ids) > seq_length or len(input_ids) < 2:
             return None
 
-        # Shift labels: labels[i] = input_ids[i+1] for loss positions
-        shifted = [CROSS_ENTROPY_IGNORE_IDX] * len(labels)
-        for j in range(len(labels) - 1):
-            if labels[j] != CROSS_ENTROPY_IGNORE_IDX:
-                shifted[j] = input_ids[j + 1]
+        # Build assistant mask via incremental prefix matching
+        assistant_mask = [0] * len(input_ids)
+        for i in range(len(messages)):
+            if not loss_flags[i]:
+                continue
 
-        return input_ids, shifted
+            # Find where this turn starts/ends by comparing prefix tokenizations
+            prefix_text = tokenizer.apply_chat_template(
+                messages[:i], tokenize=False, add_generation_prompt=False,
+            ) if i > 0 else ""
+            full_text = tokenizer.apply_chat_template(
+                messages[:i + 1], tokenize=False, add_generation_prompt=False,
+            )
+
+            prefix_ids = tokenizer(
+                prefix_text, truncation=False, padding=False, return_tensors=None,
+            )["input_ids"] if prefix_text else []
+            full_ids = tokenizer(
+                full_text, truncation=False, padding=False, return_tensors=None,
+            )["input_ids"]
+
+            start = len(prefix_ids)
+            end = len(full_ids)
+            for j in range(start, min(end, len(input_ids))):
+                assistant_mask[j] = 1
+
+        # Apply mask and shift labels (matching ChatDataset's _package_tokenized_example)
+        labels = list(input_ids)
+        labels = [l if m else CROSS_ENTROPY_IGNORE_IDX for l, m in zip(labels, assistant_mask)]
+
+        # Shift: input_ids = input_ids[:-1], labels = labels[1:]
+        input_ids = input_ids[:-1]
+        labels = labels[1:]
+
+        if len(input_ids) < 2:
+            return None
+
+        return input_ids, labels
     except Exception:
         return None
 
@@ -253,6 +264,7 @@ class StreamingGemma4Dataset(IterableDataset):
                 result = self._process_sample(sample)
                 if result is not None:
                     input_ids, labels = result
+                    assert len(input_ids) == len(labels), f"len mismatch: {len(input_ids)} vs {len(labels)}"
                     yield {
                         "input_ids": input_ids,
                         "labels": labels,
