@@ -184,15 +184,20 @@ class Gemma4NeMoAttention(nn.Module):
         # For unpacked sequences, use TE attention with causal masking.
         if attention_mask is not None and attention_mask.dim() == 4:
             # Packed sequence: use F.scaled_dot_product_attention with 4D mask
-            # q,k,v: [B, S, H, D] → [B, H, S, D] for SDPA
-            q_sdpa = q.transpose(1, 2)
-            k_sdpa = k.transpose(1, 2)
-            v_sdpa = v.transpose(1, 2)
-            # Expand mask for GQA: [B, 1, S, S] broadcasts over heads
+            # q: [B, S, H_q, D], k,v: [B, S, H_kv, D] → [B, H, S, D] for SDPA
+            q_sdpa = q.transpose(1, 2)  # [B, H_q, S, D]
+            k_sdpa = k.transpose(1, 2)  # [B, H_kv, S, D]
+            v_sdpa = v.transpose(1, 2)  # [B, H_kv, S, D]
+            # GQA: repeat KV heads to match Q heads
+            if self.num_heads != self.num_kv_heads:
+                n_rep = self.num_heads // self.num_kv_heads
+                k_sdpa = k_sdpa.repeat_interleave(n_rep, dim=1)
+                v_sdpa = v_sdpa.repeat_interleave(n_rep, dim=1)
+            # Mask: [B, 1, S, S] broadcasts over heads
             out = torch.nn.functional.scaled_dot_product_attention(
                 q_sdpa, k_sdpa, v_sdpa, attn_mask=attention_mask, is_causal=False,
             )
-            out = out.transpose(1, 2).contiguous()  # [B, S, H, D]
+            out = out.transpose(1, 2).contiguous()  # [B, S, H_q, D]
         else:
             # Unpacked: use TE attention with implicit causal masking
             te_kwargs = {}
