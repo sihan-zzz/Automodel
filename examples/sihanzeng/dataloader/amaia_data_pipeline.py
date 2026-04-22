@@ -601,13 +601,19 @@ class PackSFT(StreamDataset[dict]):
 
 
 class PackCPT(StreamDataset[dict]):
-    """Online CPT packer: wrap-around, no padding, no seq_lens.
+    """Online CPT packer with document boundary tracking.
 
-    Concatenates tokenized text into fixed-length windows. If a document
-    doesn't fit, it's split across windows (wrap=True).
+    Concatenates tokenized text into fixed-length windows with wrap-around
+    (documents split across pack boundaries). Tracks seq_lens and
+    position_ids per document for block-diagonal causal attention masking,
+    preventing cross-document attention contamination.
+
+    Matches amaia's doc_causal behavior: each document gets its own
+    attention block even when wrapped across pack boundaries.
 
     Input items: {"input_ids": list[int], "labels": list[int]}
-    Output items: {"input_ids": list[int], "labels": list[int]}
+    Output items: {"input_ids": list, "labels": list, "position_ids": list,
+                   "seq_lens": list, "seq_lens_padded": list}
     """
 
     def __init__(
@@ -619,48 +625,68 @@ class PackCPT(StreamDataset[dict]):
         self.pack_size = pack_size
         self.buf_ids: list[int] = []
         self.buf_labels: list[int] = []
+        self.buf_pos: list[int] = []
+        self.buf_seq_lens: list[int] = []
         self.leftover_ids: list[int] = []
         self.leftover_labels: list[int] = []
+        self.leftover_pos_start: int = 0
 
     def reset(self) -> None:
         self.dataset.reset()
         self.buf_ids = []
         self.buf_labels = []
+        self.buf_pos = []
+        self.buf_seq_lens = []
         self.leftover_ids = []
         self.leftover_labels = []
+        self.leftover_pos_start = 0
 
     def __next__(self) -> dict:
         while len(self.buf_ids) < self.pack_size:
             if self.leftover_ids:
                 ids = self.leftover_ids
                 lbls = self.leftover_labels
+                pos_start = self.leftover_pos_start
                 self.leftover_ids = []
                 self.leftover_labels = []
+                self.leftover_pos_start = 0
             else:
                 try:
                     item = next(self.dataset)
                     ids = item["input_ids"]
                     lbls = item["labels"]
+                    pos_start = 0
                 except StopIteration:
                     break
 
             space = self.pack_size - len(self.buf_ids)
             if len(ids) <= space:
+                chunk_len = len(ids)
                 self.buf_ids.extend(ids)
                 self.buf_labels.extend(lbls)
+                self.buf_pos.extend(range(pos_start, pos_start + chunk_len))
+                self.buf_seq_lens.append(chunk_len)
             else:
                 self.buf_ids.extend(ids[:space])
                 self.buf_labels.extend(lbls[:space])
+                self.buf_pos.extend(range(pos_start, pos_start + space))
+                self.buf_seq_lens.append(space)
                 self.leftover_ids = ids[space:]
                 self.leftover_labels = lbls[space:]
+                self.leftover_pos_start = pos_start + space
 
         if len(self.buf_ids) == self.pack_size:
             result = {
                 "input_ids": self.buf_ids,
                 "labels": self.buf_labels,
+                "position_ids": self.buf_pos,
+                "seq_lens": list(self.buf_seq_lens),
+                "seq_lens_padded": list(self.buf_seq_lens),
             }
             self.buf_ids = []
             self.buf_labels = []
+            self.buf_pos = []
+            self.buf_seq_lens = []
             return result
 
         raise StopIteration

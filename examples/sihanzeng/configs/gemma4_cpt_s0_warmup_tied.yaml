@@ -61,7 +61,7 @@ packed_sequence:
   packed_sequence_size: 0
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
-  collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
+  collate_fn: nemo_automodel.components.datasets.utils.packed_thd_collater_with_mm
   batch_size: 4
   num_workers: 0
 optimizer:
