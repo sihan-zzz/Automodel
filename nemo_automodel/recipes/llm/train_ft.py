@@ -177,6 +177,7 @@ def build_model(
     activation_checkpointing=False,
     unfreeze_modules: list[str] | None = None,
     freeze_all_except: list[str] | None = None,
+    new_token_start_id: int | None = None,
     sdpa_method: list[str] | None = None,
 ) -> tuple[nn.Module | AutoPipeline, list["Optimizer"]]:  # noqa: F821
     """Build and initialize a model.
@@ -321,6 +322,25 @@ def build_model(
             if any(module_name in name for module_name in unfreeze_modules):
                 param.requires_grad_(True)
         logging.info(f"Unfroze parameters matching: {unfreeze_modules}")
+
+    # Register gradient hooks to zero out gradients for original token embeddings,
+    # only training new token rows (e.g. SID tokens added via vocab expansion).
+    # Config: new_token_start_id: 262144  (original vocab size)
+    if new_token_start_id is not None:
+        new_token_start_id = int(new_token_start_id)
+        for name, param in model.named_parameters():
+            if "embed_tokens" in name or "lm_head" in name:
+                def _make_hook(start_id, pname):
+                    def hook(grad):
+                        grad[:start_id] = 0
+                        return grad
+                    return hook
+                param.register_hook(_make_hook(new_token_start_id, name))
+                logging.info(
+                    f"Registered gradient mask on {name}: "
+                    f"rows 0..{new_token_start_id-1} frozen, "
+                    f"{new_token_start_id}+ trainable"
+                )
 
     return model
 
@@ -1059,6 +1079,7 @@ class TrainFinetuneRecipeForNextTokenPrediction(BaseRecipe):
             cfg_moe=self.dist_setup.moe_config,
             activation_checkpointing=self.dist_setup.activation_checkpointing,
             freeze_all_except=self.cfg.get("freeze_all_except", None),
+            new_token_start_id=self.cfg.get("new_token_start_id", None),
             sdpa_method=self.cfg.get("sdpa_method", None),
         )
         self.optimizer = build_optimizer(model, self.cfg.optimizer, self.distributed_config, self.device_mesh)
