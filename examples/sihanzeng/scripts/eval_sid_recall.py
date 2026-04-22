@@ -88,7 +88,8 @@ def main():
                 exact_match += 1
 
         results.append({
-            "prompt": prompts[i][-80:],
+            "prompt": prompts[i][-120:],
+            "generated": gen_text[:200],
             "target": target,
             "pred": pred,
             "format_ok": is_format_ok,
