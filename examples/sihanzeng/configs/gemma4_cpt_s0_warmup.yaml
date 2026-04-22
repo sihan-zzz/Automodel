@@ -35,8 +35,9 @@ model:
     fake_balanced_gate: false
     enable_hf_state_dict_adapter: true
     enable_fsdp_optimizations: true
-  # TODO: implement frozen_params — freeze all except embed_tokens + lm_head
-  # amaia uses: frozen_param_filter: "^(layers\\.|norm\\.)"
+freeze_all_except:
+  - embed_tokens
+  - lm_head
 checkpoint:
   enabled: true
   path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0

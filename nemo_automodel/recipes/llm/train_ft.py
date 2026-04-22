@@ -176,6 +176,7 @@ def build_model(
     cfg_moe=None,
     activation_checkpointing=False,
     unfreeze_modules: list[str] | None = None,
+    freeze_all_except: list[str] | None = None,
     sdpa_method: list[str] | None = None,
 ) -> tuple[nn.Module | AutoPipeline, list["Optimizer"]]:  # noqa: F821
     """Build and initialize a model.
@@ -298,6 +299,21 @@ def build_model(
                 load_base_model=False,
                 cache_dir=hf_constants.HF_HUB_CACHE,
             )
+
+    # Freeze all parameters except specified modules (e.g. embedding warmup)
+    if freeze_all_except:
+        frozen_count, unfrozen_count = 0, 0
+        for name, param in model.named_parameters():
+            if any(module_name in name for module_name in freeze_all_except):
+                param.requires_grad_(True)
+                unfrozen_count += 1
+            else:
+                param.requires_grad_(False)
+                frozen_count += 1
+        logging.info(
+            f"freeze_all_except: frozen {frozen_count} params, "
+            f"unfrozen {unfrozen_count} params matching {freeze_all_except}"
+        )
 
     # Explicitly unfreeze specified modules (e.g. task heads) that need full fine-tuning
     if unfreeze_modules:
@@ -1042,6 +1058,7 @@ class TrainFinetuneRecipeForNextTokenPrediction(BaseRecipe):
             cfg_qat=self.cfg.get("qat", None),
             cfg_moe=self.dist_setup.moe_config,
             activation_checkpointing=self.dist_setup.activation_checkpointing,
+            freeze_all_except=self.cfg.get("freeze_all_except", None),
             sdpa_method=self.cfg.get("sdpa_method", None),
         )
         self.optimizer = build_optimizer(model, self.cfg.optimizer, self.distributed_config, self.device_mesh)
