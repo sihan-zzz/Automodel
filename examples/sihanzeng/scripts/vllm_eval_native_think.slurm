@@ -17,6 +17,7 @@ CONTAINER=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/vllm-v0.19.1-cu130.sq
 HF_MODEL=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
 RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_gemma4_bench
 TASK_DIR=$HOME/Automodel/examples/sihanzeng/eval_tasks
+SCRIPTS_DIR=$HOME/Automodel/examples/sihanzeng/scripts
 
 export HF_HOME=/tmp/hf_cache
 export XDG_CACHE_HOME=/tmp/xdg_cache
@@ -55,11 +56,6 @@ srun --container-image=$CONTAINER \
 mkdir -p /tmp/hf_cache /tmp/xdg_cache /tmp/triton_cache
 export HF_HOME=/tmp/hf_cache XDG_CACHE_HOME=/tmp/xdg_cache TRITON_CACHE_DIR=/tmp/triton_cache
 
-echo 'Copying model to local SSD...'
-LOCAL_MODEL=/tmp/model_local
-cp -r $HF_MODEL \$LOCAL_MODEL
-echo 'Done copying'
-
 pip install --target=/tmp/lm_eval_pkg lm-eval ray 2>&1 | tail -3
 export PYTHONPATH=/tmp/lm_eval_pkg:\$PYTHONPATH
 
@@ -67,12 +63,12 @@ echo 'vLLM:' \$(python3 -c 'import vllm; print(vllm.__version__)' 2>&1)
 echo 'Starting: $TASK'
 echo 'Gen start: '\$(date)
 
-LAUNCHER=\$HOME/Automodel/examples/sihanzeng/vllm_eval_launcher_minimal.py
+LAUNCHER=\$HOME/Automodel/examples/sihanzeng/scripts/vllm_eval_launcher_minimal.py
 LIMIT_FLAG=''
 if [ $LIMIT -gt 0 ]; then LIMIT_FLAG='--limit $LIMIT'; fi
 
 python3 \$LAUNCHER --model vllm \
-    --model_args pretrained=\$LOCAL_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
+    --model_args pretrained=$HF_MODEL,dtype=bfloat16,tensor_parallel_size=1,data_parallel_size=8,gpu_memory_utilization=0.90,max_model_len=32768,enable_thinking=True,think_end_token='<channel|>' \
     --tasks $TASK \
     --batch_size 64 \
     --num_fewshot 0 \

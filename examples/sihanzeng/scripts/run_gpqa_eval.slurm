@@ -18,7 +18,7 @@ HF_MODEL=${MODEL_PATH:?Must set MODEL_PATH}
 EVAL_NAME=${EVAL_NAME:-gpqa_eval}
 RESULTS_DIR=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/eval_${EVAL_NAME}
 TASK_DIR=$HOME/Automodel/examples/sihanzeng/eval_tasks
-LAUNCHER=$HOME/Automodel/examples/sihanzeng/vllm_eval_launcher_minimal.py
+LAUNCHER=$HOME/Automodel/examples/sihanzeng/scripts/vllm_eval_launcher_minimal.py
 DP=${DP_SIZE:-4}
 
 export HF_HOME=/tmp/hf_cache
