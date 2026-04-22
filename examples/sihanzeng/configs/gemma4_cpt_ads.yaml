@@ -1,0 +1,79 @@
+# Phase CPT: Full model training with ads + replay data
+# Follows amaia v5_7_cond_b pattern: 70% ads, 30% replay
+# Continue from S0 warmup checkpoint
+recipe: TrainFinetuneRecipeForNextTokenPrediction
+step_scheduler:
+  global_batch_size: 16
+  local_batch_size: 2
+  ckpt_every_steps: 1000
+  val_every_steps: 1000
+  num_epochs: 1
+  max_steps: 8600
+dist_env:
+  backend: nccl
+  timeout_minutes: 30
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 42
+  ranked: true
+model:
+  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
+  # TODO: update to S0 warmup checkpoint path after S0 completes
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000001200
+  torch_dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: eager
+  backend:
+    _target_: nemo_automodel.components.models.common.BackendConfig
+    attn: te
+    linear: te
+    rms_norm: te
+    rope_fusion: true
+    experts: torch_mm
+    dispatcher: deepep
+    fake_balanced_gate: false
+    enable_hf_state_dict_adapter: true
+    enable_fsdp_optimizations: true
+checkpoint:
+  enabled: true
+  path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads
+distributed:
+  strategy: fsdp2
+  tp_size: 1
+  cp_size: 1
+  pp_size: 1
+  ep_size: 8
+  sequence_parallel: false
+  activation_checkpointing: true
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+dataset:
+  _target_: streaming_gemma4_dataset.StreamingGemma4Dataset
+  mode: cpt
+  sources:
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/ads_v4.1/train
+      weight: 0.70
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/fineweb-edu-10bt-jsonl
+      weight: 0.125
+    # TODO: verify these paths exist as JSONL
+    # - path: /mnt/lustre/.../open-web-math
+    #   weight: 0.0875
+    # - path: /mnt/lustre/.../arxiv-jsonl
+    #   weight: 0.05
+    # - path: /mnt/lustre/.../stackexchange
+    #   weight: 0.0375
+  seq_length: 4096
+  pack_size: 4096
+  shuffle_buffer_size: 64
+packed_sequence:
+  packed_sequence_size: 0
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
+  batch_size: 2
+  num_workers: 0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.95]

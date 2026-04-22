@@ -253,9 +253,18 @@ class StreamingGemma4Dataset(IterableDataset):
         return {"input_ids": input_ids, "labels": labels}
 
     def _build_pipeline(self) -> StreamDataset:
-        """Build the amaia-style composable pipeline."""
+        """Build the amaia-style composable pipeline.
+
+        Each source can override mode via per-source 'type' field:
+          sources:
+            - path: .../tulu3_sft
+              weight: 0.50
+              type: sft        # default: uses top-level 'mode'
+            - path: .../fineweb-edu
+              weight: 0.15
+              type: cpt        # override: CPT processing for this source
+        """
         dp_rank, dp_world_size = self._get_dp_info()
-        process_fn = self._process_sft if self.mode == "sft" else self._process_cpt
 
         per_source_datasets = []
         weights = []
@@ -263,8 +272,10 @@ class StreamingGemma4Dataset(IterableDataset):
             path = src["path"]
             weight = float(src.get("weight", 1.0))
             max_epochs = src.get("max_epochs", self.max_epochs)
+            src_mode = src.get("type", self.mode)
+            process_fn = self._process_sft if src_mode == "sft" else self._process_cpt
             logger.info(
-                f"Building pipeline: {path} (weight={weight}, "
+                f"Building pipeline: {path} (weight={weight}, mode={src_mode}, "
                 f"max_epochs={max_epochs}, dp_rank={dp_rank}/{dp_world_size})"
             )
 
