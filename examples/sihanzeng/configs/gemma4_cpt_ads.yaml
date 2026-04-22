@@ -20,7 +20,8 @@ rng:
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it-expanded
+  # Load S0 warmup checkpoint (consolidated HF format)
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/epoch_0_step_1199/model/consolidated
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -38,7 +39,6 @@ model:
 checkpoint:
   enabled: true
   checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads
-  restore_from: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/epoch_0_step_1199
 distributed:
   strategy: fsdp2
   tp_size: 1
