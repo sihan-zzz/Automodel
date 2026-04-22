@@ -40,7 +40,7 @@ freeze_all_except:
   - lm_head
 checkpoint:
   enabled: true
-  path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0
 distributed:
   strategy: fsdp2
   tp_size: 1

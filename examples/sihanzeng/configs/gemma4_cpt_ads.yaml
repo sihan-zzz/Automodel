@@ -37,7 +37,7 @@ model:
     enable_fsdp_optimizations: true
 checkpoint:
   enabled: true
-  path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads
 distributed:
   strategy: fsdp2
   tp_size: 1
