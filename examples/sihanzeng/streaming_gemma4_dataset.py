@@ -288,8 +288,12 @@ class StreamingGemma4Dataset(IterableDataset):
             if result is not None:
                 yield result
 
-    def _pack_stream(self, token_stream):
-        """Online greedy packer: fill fixed-length windows from token stream.
+    def _pack_stream(self, token_stream, lookahead: int = 64):
+        """Online greedy packer with lookahead buffer for better bin-packing.
+
+        Maintains a buffer of tokenized conversations. When a conversation
+        doesn't fit the remaining space, searches the buffer for a smaller
+        one that does — reducing padding waste.
 
         Yields dicts with input_ids, labels, position_ids, seq_lens, seq_lens_padded
         compatible with packed_thd_collater_with_mm + SDPA block-diagonal mask.
@@ -297,26 +301,50 @@ class StreamingGemma4Dataset(IterableDataset):
         pack_size = self.pack_size
         pad_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
 
+        # Lookahead buffer: list of (input_ids, labels, seq_len)
+        pending: list[tuple[list[int], list[int], int]] = []
+
+        def refill_pending():
+            while len(pending) < lookahead:
+                try:
+                    ids, lbls = next(token_iter)
+                    sl = len(ids)
+                    if sl <= pack_size:
+                        pending.append((ids, lbls, sl))
+                except StopIteration:
+                    break
+
+        def find_best_fit(space: int) -> int | None:
+            """Find the largest conversation in pending that fits in space."""
+            best_idx, best_len = None, 0
+            for i, (_, _, sl) in enumerate(pending):
+                if sl <= space and sl > best_len:
+                    best_idx, best_len = i, sl
+            return best_idx
+
+        token_iter = iter(token_stream)
         buf_ids, buf_labels, buf_pos, buf_seq_lens = [], [], [], []
 
-        for input_ids, labels in token_stream:
-            seq_len = len(input_ids)
-            if seq_len > pack_size:
-                continue
-
+        refill_pending()
+        while pending:
             space_left = pack_size - len(buf_ids)
-            if seq_len <= space_left:
-                buf_ids.extend(input_ids)
-                buf_labels.extend(labels)
-                buf_pos.extend(range(seq_len))
-                buf_seq_lens.append(seq_len)
+            fit_idx = find_best_fit(space_left)
+
+            if fit_idx is not None:
+                ids, lbls, sl = pending.pop(fit_idx)
+                buf_ids.extend(ids)
+                buf_labels.extend(lbls)
+                buf_pos.extend(range(sl))
+                buf_seq_lens.append(sl)
+                refill_pending()
             else:
+                # Nothing fits — emit current pack and start fresh
                 if buf_ids:
                     yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
-                buf_ids = list(input_ids)
-                buf_labels = list(labels)
-                buf_pos = list(range(seq_len))
-                buf_seq_lens = [seq_len]
+                buf_ids, buf_labels, buf_pos, buf_seq_lens = [], [], [], []
+                refill_pending()
+                if not pending:
+                    break
 
         if buf_ids:
             yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
