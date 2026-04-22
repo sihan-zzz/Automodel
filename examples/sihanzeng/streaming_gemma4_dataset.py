@@ -1,8 +1,10 @@
-"""Streaming unpacked dataset for Gemma4 SFT with native thinking format.
+"""Streaming dataset for Gemma4 SFT with native thinking format.
+
+Supports both unpacked (one conversation per sample) and packed (multiple
+conversations per fixed-length window) modes.
 
 Converts <think>...</think> tags to Gemma4's native <|channel>thought format.
 Streams JSONL from multiple sources with weighted sampling.
-Yields individual conversations (unpacked) with proper loss masking.
 """
 from __future__ import annotations
 
@@ -175,9 +177,13 @@ class StreamingGemma4Dataset(IterableDataset):
 
     - Converts <think>...</think> → <|channel>thought\\n...\\n<channel|>
     - Streams JSONL from multiple weighted sources
-    - Yields individual conversations (unpacked)
+    - Supports unpacked (one conv per sample) or packed (multiple convs per window)
     - Proper loss masking (assistant-only) with shifted labels
+    - amaia-style line-level sharding for even DP distribution
     - Reservoir shuffle for randomization
+
+    When pack_size > 0, yields packed samples with seq_lens for block-diagonal
+    attention masking (compatible with packed_thd_collater_with_mm).
     """
 
     def __init__(
@@ -186,6 +192,7 @@ class StreamingGemma4Dataset(IterableDataset):
         tokenizer=None,
         *,
         seq_length: int = 8192,
+        pack_size: int = 0,
         seed: int = 42,
         shuffle_buffer_size: int = 256,
         convert_thinking: bool = True,
@@ -195,6 +202,7 @@ class StreamingGemma4Dataset(IterableDataset):
     ):
         self.tokenizer = tokenizer
         self.seq_length = seq_length
+        self.pack_size = pack_size
         self.seed = seed
         self.shuffle_buffer_size = shuffle_buffer_size
         self.convert_thinking = convert_thinking
@@ -270,21 +278,83 @@ class StreamingGemma4Dataset(IterableDataset):
             pass
         return 0, 1
 
+    def _tokenized_stream(self):
+        """Yield (input_ids, labels) tuples with amaia-style line-level sharding."""
+        dp_rank, dp_world_size = self._get_dp_info()
+        for idx, sample in enumerate(self.blended):
+            if idx % dp_world_size != dp_rank:
+                continue
+            result = self._process_sample(sample)
+            if result is not None:
+                yield result
+
+    def _pack_stream(self, token_stream):
+        """Online greedy packer: fill fixed-length windows from token stream.
+
+        Yields dicts with input_ids, labels, position_ids, seq_lens, seq_lens_padded
+        compatible with packed_thd_collater_with_mm + SDPA block-diagonal mask.
+        """
+        pack_size = self.pack_size
+        pad_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
+
+        buf_ids, buf_labels, buf_pos, buf_seq_lens = [], [], [], []
+
+        for input_ids, labels in token_stream:
+            seq_len = len(input_ids)
+            if seq_len > pack_size:
+                continue
+
+            space_left = pack_size - len(buf_ids)
+            if seq_len <= space_left:
+                buf_ids.extend(input_ids)
+                buf_labels.extend(labels)
+                buf_pos.extend(range(seq_len))
+                buf_seq_lens.append(seq_len)
+            else:
+                if buf_ids:
+                    yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
+                buf_ids = list(input_ids)
+                buf_labels = list(labels)
+                buf_pos = list(range(seq_len))
+                buf_seq_lens = [seq_len]
+
+        if buf_ids:
+            yield self._finalize_pack(buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id)
+
+    def _finalize_pack(self, buf_ids, buf_labels, buf_pos, buf_seq_lens, pad_id):
+        pack_size = self.pack_size
+        pad_len = pack_size - len(buf_ids)
+
+        if pad_len > 0:
+            buf_ids = buf_ids + [pad_id] * pad_len
+            buf_labels = buf_labels + [CROSS_ENTROPY_IGNORE_IDX] * pad_len
+            last_pos = buf_pos[-1] if buf_pos else 0
+            buf_pos = buf_pos + list(range(last_pos + 1, last_pos + 1 + pad_len))
+
+        seq_lens_padded = list(buf_seq_lens)
+        if pad_len > 0:
+            seq_lens_padded[-1] = seq_lens_padded[-1] + pad_len
+
+        return {
+            "input_ids": buf_ids,
+            "labels": buf_labels,
+            "position_ids": buf_pos,
+            "seq_lens": list(buf_seq_lens),
+            "seq_lens_padded": seq_lens_padded,
+        }
+
     def __iter__(self):
         self._drop_count = 0
         self._total_count = 0
-        dp_rank, dp_world_size = self._get_dp_info()
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
 
-        def sample_stream():
-            # amaia-style line-level interleaving: each rank keeps every Nth sample
-            for idx, sample in enumerate(self.blended):
-                if idx % dp_world_size != dp_rank:
-                    continue
-                result = self._process_sample(sample)
-                if result is not None:
-                    input_ids, labels = result
-                    assert len(input_ids) == len(labels), f"len mismatch: {len(input_ids)} vs {len(labels)}"
-                    pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
+        token_stream = self._tokenized_stream()
+
+        if self.pack_size > 0:
+            raw_stream = self._pack_stream(token_stream)
+        else:
+            def unpacked_stream():
+                for input_ids, labels in token_stream:
                     yield {
                         "input_ids": input_ids,
                         "labels": labels,
@@ -295,26 +365,24 @@ class StreamingGemma4Dataset(IterableDataset):
                             "attention_mask": 0,
                         },
                     }
+            raw_stream = unpacked_stream()
 
-        stream = sample_stream()
-
+        # Reservoir shuffle
         if self.shuffle_buffer_size <= 0:
-            yield from stream
+            yield from raw_stream
             return
 
         rng = random.Random(self.seed)
         buffer = []
-
-        for item in stream:
+        for item in raw_stream:
             buffer.append(item)
             if len(buffer) == self.shuffle_buffer_size:
                 break
-
         if not buffer:
             return
 
         rng.shuffle(buffer)
-        for item in stream:
+        for item in raw_stream:
             idx = rng.randrange(len(buffer))
             yield buffer[idx]
             buffer[idx] = item

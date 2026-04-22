@@ -1,5 +1,6 @@
-# StreamingGemma4Dataset + offline packing via pack_dataset
-# Tests if our streaming reader works with packing + SDPA masking
+# StreamingGemma4Dataset with ONLINE packing (no offline pack_dataset)
+# pack_size=4096 enables greedy bin-packing in the iterator
+# Model uses SDPA block-diagonal mask from seq_lens for proper attention
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
   global_batch_size: 16
@@ -50,10 +51,11 @@ dataset:
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/tulu3_sft
       weight: 1.0
   seq_length: 4096
-  shuffle_buffer_size: 256
+  pack_size: 4096
+  shuffle_buffer_size: 64
   convert_thinking: false
 packed_sequence:
-  packed_sequence_size: 4096
+  packed_sequence_size: 0
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: nemo_automodel.components.datasets.utils.packed_thd_collater_with_mm
