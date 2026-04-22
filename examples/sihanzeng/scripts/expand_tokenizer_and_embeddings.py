@@ -94,10 +94,12 @@ def main():
             ) * std_head * 0.02
             logger.info(f"Initialized lm_head for {num_added} new tokens")
 
-    # Untie embeddings
+    # Untie embeddings (top-level and nested text_config for VLM models like Gemma4)
     if model.config.tie_word_embeddings:
         logger.info("Untying word embeddings (setting tie_word_embeddings=False)")
         model.config.tie_word_embeddings = False
+        if hasattr(model.config, "text_config") and hasattr(model.config.text_config, "tie_word_embeddings"):
+            model.config.text_config.tie_word_embeddings = False
         # After resize_token_embeddings with tied weights, lm_head.weight IS embed_tokens.weight
         # We need to create a separate lm_head with its own copy
         lm_head = model.get_output_embeddings()
