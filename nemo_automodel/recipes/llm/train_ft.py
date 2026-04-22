@@ -323,24 +323,14 @@ def build_model(
                 param.requires_grad_(True)
         logging.info(f"Unfroze parameters matching: {unfreeze_modules}")
 
-    # Register gradient hooks to zero out gradients for original token embeddings,
-    # only training new token rows (e.g. SID tokens added via vocab expansion).
-    # Config: new_token_start_id: 262144  (original vocab size)
+    # Note: new_token_start_id gradient masking is applied in the training loop
+    # (_run_train_optim_step) because FSDP2 flattens parameters, making
+    # pre-FSDP register_hook ineffective.
     if new_token_start_id is not None:
-        new_token_start_id = int(new_token_start_id)
-        for name, param in model.named_parameters():
-            if "embed_tokens" in name or "lm_head" in name:
-                def _make_hook(start_id, pname):
-                    def hook(grad):
-                        grad[:start_id] = 0
-                        return grad
-                    return hook
-                param.register_hook(_make_hook(new_token_start_id, name))
-                logging.info(
-                    f"Registered gradient mask on {name}: "
-                    f"rows 0..{new_token_start_id-1} frozen, "
-                    f"{new_token_start_id}+ trainable"
-                )
+        logging.info(
+            f"new_token_start_id={new_token_start_id}: gradient masking will be "
+            f"applied in training loop (post-backward, pre-optimizer-step)"
+        )
 
     return model
 
@@ -1529,6 +1519,17 @@ class TrainFinetuneRecipeForNextTokenPrediction(BaseRecipe):
 
         # Note(MegatronFSDP): Need to call these functions for MegatronFSDP if not using latest api
         # self.model_parts[0].finish_grad_sync()
+
+        # Zero out gradients for original token embeddings if new_token_start_id is set.
+        # Must happen after FSDP unshard (post-backward) and before optimizer step.
+        new_token_start_id = self.cfg.get("new_token_start_id", None)
+        if new_token_start_id is not None:
+            new_token_start_id = int(new_token_start_id)
+            for mp in self.model_parts:
+                for name, param in mp.named_parameters():
+                    if ("embed_tokens" in name or "lm_head" in name) and param.grad is not None:
+                        if param.grad.shape[0] > new_token_start_id:
+                            param.grad[:new_token_start_id] = 0
 
         self.checkpointer.maybe_wait_for_staging()
         for opt in self.optimizer:
