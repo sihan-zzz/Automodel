@@ -1,17 +1,16 @@
 # Phase CPT: Full model training with ads + replay data
-# Aligned with amaia cpt_v5b_from_zg7b.yaml:
-#   amaia: 64 GPUs, batch=4, seq=8192, 72000 steps (but dv7 uses 8600 steps from cond_b)
-#   ours:  32 GPUs, batch=2, seq=8192, 34400 steps (4x scaling from 8600)
-#   LR: 1e-5 → cosine → 5e-7, warmup 0-800 steps (scaled from 0-200)
+# Aligned with amaia cpt_v5b_from_zg7b.yaml (identical GBS, steps, LR):
+#   8 nodes (64 GPUs), batch=4/GPU, seq=8192, GBS=256, grad_acc=1
+#   8600 steps, lr=1e-5 → cosine → 5e-7, warmup 0-200
 #   Data: 70% ads + 12.5% FineWeb + 8.75% OpenWebMath + 5% arXiv + 3.75% StackEx
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 64
-  local_batch_size: 2
-  ckpt_every_steps: 4000
-  val_every_steps: 4000
+  global_batch_size: 256
+  local_batch_size: 4
+  ckpt_every_steps: 1000
+  val_every_steps: 1000
   num_epochs: 1
-  max_steps: 34400
+  max_steps: 8600
 dist_env:
   backend: nccl
   timeout_minutes: 60
@@ -21,8 +20,7 @@ rng:
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  # Load from S0 warmup checkpoint
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000004800
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000001200
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -75,11 +73,11 @@ packed_sequence:
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
-  batch_size: 2
+  batch_size: 4
   num_workers: 0
 optimizer:
   _target_: torch.optim.AdamW
   lr: 1e-5
   weight_decay: 0.01
   betas: [0.9, 0.95]
-# TODO: add LR scheduler — warmup 0-800, cosine 800-34400, min_lr=5e-7
+# TODO: LR scheduler — warmup 0-200, cosine 200-8600, min_lr=5e-7

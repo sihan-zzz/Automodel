@@ -1,16 +1,16 @@
 # Phase S0: Embedding warmup — freeze transformer, train only new SID embeddings
-# Aligned with amaia cpt_v5_s0_warmup.yaml:
-#   amaia: 64 GPUs, batch=4, seq=8192, 1200 steps, 2.52B tokens
-#   ours:  32 GPUs, batch=2, seq=8192, 4800 steps, 2.52B tokens (4x step scaling)
-#   LR: 1e-3 → cosine → 1e-4, warmup 0-400 steps (scaled from 0-100)
+# Aligned with amaia cpt_v5_s0_warmup.yaml (identical GBS, steps, LR):
+#   8 nodes (64 GPUs), batch=4/GPU, seq=8192, GBS=256, grad_acc=1
+#   1200 steps, lr=1e-3 → cosine → 1e-4, warmup 0-100
+#   100% ads data
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 64
-  local_batch_size: 2
-  ckpt_every_steps: 800
-  val_every_steps: 800
+  global_batch_size: 256
+  local_batch_size: 4
+  ckpt_every_steps: 200
+  val_every_steps: 200
   num_epochs: 1
-  max_steps: 4800
+  max_steps: 1200
 dist_env:
   backend: nccl
   timeout_minutes: 30
@@ -64,12 +64,11 @@ packed_sequence:
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
-  batch_size: 2
+  batch_size: 4
   num_workers: 0
 optimizer:
   _target_: torch.optim.AdamW
   lr: 1e-3
   weight_decay: 0.01
   betas: [0.9, 0.95]
-# TODO: add LR scheduler — warmup 0-400 steps, cosine 400-4800, min_lr=1e-4
-# NeMo Automodel lr_scheduler config TBD
+# TODO: LR scheduler — warmup 0-100, cosine 100-1200, min_lr=1e-4
