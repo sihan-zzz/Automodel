@@ -1,6 +1,6 @@
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 16
+  global_batch_size: 64
   local_batch_size: 2
   ckpt_every_steps: 500
   val_every_steps: 500
@@ -43,20 +43,19 @@ distributed:
 loss_fn:
   _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
 dataset:
-  _target_: nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset
-  path_or_dataset_id: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_1k/train.jsonl
-  split: train
+  _target_: streaming_gemma4_dataset.StreamingGemma4Dataset
+  sources:
+    - path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_1k
+      weight: 1.0
   seq_length: 2048
-  padding: do_not_pad
-  truncation: true
-  shuffle_seed: 42
+  shuffle_buffer_size: 0
+  convert_thinking: false
 packed_sequence:
   packed_sequence_size: 0
 dataloader:
   _target_: torchdata.stateful_dataloader.StatefulDataLoader
   collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
   batch_size: 2
-  shuffle: true
   num_workers: 0
 optimizer:
   _target_: torch.optim.AdamW
