@@ -1,0 +1,74 @@
+# Phase S0: Embedding warmup (UNTIED) — separate embed_tokens and lm_head
+# text_config.tie_word_embeddings=False in the expanded model
+# Freeze transformer, train embed_tokens + lm_head independently
+# 8 nodes (64 GPUs), batch=4/GPU, seq=8192, GBS=256, 1200 steps, lr=1e-3
+recipe: TrainFinetuneRecipeForNextTokenPrediction
+step_scheduler:
+  global_batch_size: 256
+  local_batch_size: 4
+  ckpt_every_steps: 200
+  val_every_steps: 200
+  num_epochs: 1
+  max_steps: 1200
+dist_env:
+  backend: nccl
+  timeout_minutes: 30
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 777
+  ranked: true
+model:
+  _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it-expanded
+  torch_dtype: bfloat16
+  trust_remote_code: true
+  attn_implementation: eager
+  backend:
+    _target_: nemo_automodel.components.models.common.BackendConfig
+    attn: te
+    linear: te
+    rms_norm: te
+    rope_fusion: true
+    experts: torch_mm
+    dispatcher: deepep
+    fake_balanced_gate: false
+    enable_hf_state_dict_adapter: true
+    enable_fsdp_optimizations: true
+freeze_all_except:
+  - embed_tokens
+  - lm_head
+checkpoint:
+  enabled: true
+  checkpoint_dir: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0_untied
+distributed:
+  strategy: fsdp2
+  tp_size: 1
+  cp_size: 1
+  pp_size: 1
+  ep_size: 8
+  sequence_parallel: false
+  activation_checkpointing: true
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+dataset:
+  _target_: streaming_gemma4_dataset.StreamingGemma4Dataset
+  mode: cpt
+  sources:
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/ads_v4.1/train
+      weight: 1.0
+  seq_length: 8192
+  pack_size: 8192
+  shuffle_buffer_size: 64
+packed_sequence:
+  packed_sequence_size: 0
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater_with_mm
+  batch_size: 4
+  num_workers: 0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-3
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+# TODO: LR scheduler — warmup 0-100, cosine 100-1200, min_lr=1e-4
