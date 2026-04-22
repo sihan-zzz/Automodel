@@ -20,7 +20,7 @@ rng:
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000001200
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/epoch_0_step_1199
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
