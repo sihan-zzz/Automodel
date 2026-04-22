@@ -1,25 +1,28 @@
 # Phase CPT: Full model training with ads + replay data
-# Follows amaia v5_7_cond_b pattern: 70% ads, 30% replay
-# Continue from S0 warmup checkpoint
+# Aligned with amaia cpt_v5b_from_zg7b.yaml:
+#   amaia: 64 GPUs, batch=4, seq=8192, 72000 steps (but dv7 uses 8600 steps from cond_b)
+#   ours:  32 GPUs, batch=2, seq=8192, 34400 steps (4x scaling from 8600)
+#   LR: 1e-5 → cosine → 5e-7, warmup 0-800 steps (scaled from 0-200)
+#   Data: 70% ads + 12.5% FineWeb + 8.75% OpenWebMath + 5% arXiv + 3.75% StackEx
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 16
+  global_batch_size: 64
   local_batch_size: 2
-  ckpt_every_steps: 1000
-  val_every_steps: 1000
+  ckpt_every_steps: 4000
+  val_every_steps: 4000
   num_epochs: 1
-  max_steps: 8600
+  max_steps: 34400
 dist_env:
   backend: nccl
-  timeout_minutes: 30
+  timeout_minutes: 60
 rng:
   _target_: nemo_automodel.components.training.rng.StatefulRNG
-  seed: 42
+  seed: 777
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  # TODO: update to S0 warmup checkpoint path after S0 completes
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000001200
+  # Load from S0 warmup checkpoint
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0/checkpoint_0000004800
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -51,19 +54,21 @@ dataset:
   _target_: streaming_gemma4_dataset.StreamingGemma4Dataset
   mode: cpt
   sources:
+    # 70% ads
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/ads_v4.1/train
-      weight: 0.70
-    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/fineweb-edu-10bt-jsonl
-      weight: 0.125
-    # TODO: verify these paths exist as JSONL
-    # - path: /mnt/lustre/.../open-web-math
-    #   weight: 0.0875
+      weight: 70.0
+    # 30% replay (5R split)
+    - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/fineweb-edu-100bt-jsonl
+      weight: 12.5
+    # TODO: verify these replay paths on Lustre
+    # - path: /mnt/lustre/.../openwebmath-jsonl
+    #   weight: 8.75
     # - path: /mnt/lustre/.../arxiv-jsonl
-    #   weight: 0.05
-    # - path: /mnt/lustre/.../stackexchange
-    #   weight: 0.0375
-  seq_length: 4096
-  pack_size: 4096
+    #   weight: 5.0
+    # - path: /mnt/lustre/.../stackexchange-jsonl
+    #   weight: 3.75
+  seq_length: 8192
+  pack_size: 8192
   shuffle_buffer_size: 64
 packed_sequence:
   packed_sequence_size: 0
@@ -77,3 +82,4 @@ optimizer:
   lr: 1e-5
   weight_decay: 0.01
   betas: [0.9, 0.95]
+# TODO: add LR scheduler — warmup 0-800, cosine 800-34400, min_lr=5e-7

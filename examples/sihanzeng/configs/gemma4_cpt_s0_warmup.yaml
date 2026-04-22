@@ -1,20 +1,22 @@
 # Phase S0: Embedding warmup — freeze transformer, train only new SID embeddings
-# ~1200 steps, high LR, 100% ads data
-# Follows amaia cpt_v5_s0_warmup.yaml pattern
+# Aligned with amaia cpt_v5_s0_warmup.yaml:
+#   amaia: 64 GPUs, batch=4, seq=8192, 1200 steps, 2.52B tokens
+#   ours:  32 GPUs, batch=2, seq=8192, 4800 steps, 2.52B tokens (4x step scaling)
+#   LR: 1e-3 → cosine → 1e-4, warmup 0-400 steps (scaled from 0-100)
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 16
+  global_batch_size: 64
   local_batch_size: 2
-  ckpt_every_steps: 400
-  val_every_steps: 400
+  ckpt_every_steps: 800
+  val_every_steps: 800
   num_epochs: 1
-  max_steps: 1200
+  max_steps: 4800
 dist_env:
   backend: nccl
   timeout_minutes: 30
 rng:
   _target_: nemo_automodel.components.training.rng.StatefulRNG
-  seed: 42
+  seed: 777
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
@@ -33,8 +35,8 @@ model:
     fake_balanced_gate: false
     enable_hf_state_dict_adapter: true
     enable_fsdp_optimizations: true
-  # TODO: freeze all params except embed_tokens and lm_head
-  # frozen_params not natively supported — need code change
+  # TODO: implement frozen_params — freeze all except embed_tokens + lm_head
+  # amaia uses: frozen_param_filter: "^(layers\\.|norm\\.)"
 checkpoint:
   enabled: true
   path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_s0
@@ -54,8 +56,8 @@ dataset:
   sources:
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/ads_v4.1/train
       weight: 1.0
-  seq_length: 4096
-  pack_size: 4096
+  seq_length: 8192
+  pack_size: 8192
   shuffle_buffer_size: 64
 packed_sequence:
   packed_sequence_size: 0
@@ -69,3 +71,5 @@ optimizer:
   lr: 1e-3
   weight_decay: 0.01
   betas: [0.9, 0.95]
+# TODO: add LR scheduler — warmup 0-400 steps, cosine 400-4800, min_lr=1e-4
+# NeMo Automodel lr_scheduler config TBD

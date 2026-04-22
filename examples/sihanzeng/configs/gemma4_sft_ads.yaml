@@ -1,26 +1,29 @@
 # Phase SFT: Mixed ads + general instruction training
-# Follows amaia sft_distill_v7_profile_keep_desc pattern
-# Continue from CPT checkpoint
-# Data mix: 50% Tulu3 + 20% UIH + 10% targeting + 5% CPT rehearsal + 15% FineWeb
+# Aligned with amaia sft_distill_v7_profile_keep_desc.yaml:
+#   amaia: 64 GPUs, batch=4, seq=8192, 1500 steps, 3.15B tokens
+#   ours:  32 GPUs, batch=2, seq=8192, 6000 steps, 3.15B tokens (4x scaling)
+#   LR: 1e-5 (constant from preset)
+#   Data: 50% Tulu3 + 20% UIH + 10% targeting + 5% CPT rehearsal + 15% FineWeb
+#   Eval: ifeval_chat.loose, cross_eval_uih.0.all + GPQA/MMLU-Pro/AIME (generic)
 recipe: TrainFinetuneRecipeForNextTokenPrediction
 step_scheduler:
-  global_batch_size: 16
+  global_batch_size: 64
   local_batch_size: 2
-  ckpt_every_steps: 500
-  val_every_steps: 500
+  ckpt_every_steps: 2000
+  val_every_steps: 2000
   num_epochs: 1
-  max_steps: 1500
+  max_steps: 6000
 dist_env:
   backend: nccl
-  timeout_minutes: 30
+  timeout_minutes: 60
 rng:
   _target_: nemo_automodel.components.training.rng.StatefulRNG
-  seed: 42
+  seed: 777
   ranked: true
 model:
   _target_: nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained
-  # TODO: update to CPT checkpoint path after CPT completes
-  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads/checkpoint_0000008600
+  # Load from CPT checkpoint
+  pretrained_model_name_or_path: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/nemo_runs/gemma4_cpt_ads/checkpoint_0000034400
   torch_dtype: bfloat16
   trust_remote_code: true
   attn_implementation: eager
@@ -63,15 +66,15 @@ dataset:
     # - path: .../targeting_v9/targeting_v9_train.jsonl
     #   weight: 0.10
     #   type: sft
-    # CPT replay sources (pretrain format, all-token loss, wrap-around)
+    # CPT replay sources (pretrain format, all-token loss)
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/ads_v4.1/train
       weight: 0.05
       type: cpt
     - path: /mnt/lustre/metavmds0lstre/teams/ads_cpt/datasets/fineweb-edu-10bt-jsonl
       weight: 0.15
       type: cpt
-  seq_length: 4096
-  pack_size: 4096
+  seq_length: 8192
+  pack_size: 8192
   shuffle_buffer_size: 64
   convert_thinking: false
 packed_sequence:
