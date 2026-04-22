@@ -22,7 +22,6 @@ SCRIPTS_DIR=$AUTOMODEL_DIR/examples/sihanzeng
 CONFIG_FILE=${CONFIG:-gemma4_26b_sft_packed.yaml}
 CONFIG=$SCRIPTS_DIR/$CONFIG_FILE
 
-# Rendezvous for multi-node torchrun
 MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n1)
 MASTER_PORT=${MASTER_PORT:-29500}
 
@@ -46,22 +45,8 @@ echo "Config: $CONFIG_FILE"
 echo "Master: $MASTER_ADDR:$MASTER_PORT"
 echo "Nodes: $(scontrol show hostnames $SLURM_JOB_NODELIST | tr '\n' ' ')"
 
-# Copy model from Lustre to local NVMe on each node for faster loading
-# Config YAML points to /tmp/gemma4_model (set in gemma4_26b_sft_packed.yaml)
-LUSTRE_MODEL=/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/models/gemma-4-26B-A4B-it
-
-echo "Copying model to local disk on each node..."
-START_COPY=$(date +%s)
-srun --ntasks-per-node=1 bash -c "
-  mkdir -p /tmp/gemma4_model
-  cp -r $LUSTRE_MODEL/* /tmp/gemma4_model/
-  echo \"\$(hostname): copy done\"
-"
-END_COPY=$(date +%s)
-echo "Model copy took $(( END_COPY - START_COPY ))s"
-
 srun --container-image=$CONTAINER \
-     --container-mounts=/mnt/lustre/metavmds0lstre:/mnt/lustre/metavmds0lstre,/tmp/gemma4_model:/tmp/gemma4_model \
+     --container-mounts=/mnt/lustre/metavmds0lstre:/mnt/lustre/metavmds0lstre \
      --container-env=FLASHINFER_WORKSPACE_DIR,HF_HOME,XDG_CACHE_HOME,TRITON_CACHE_DIR,PYTHONUNBUFFERED,NCCL_DEBUG,CUDA_DEVICE_MAX_CONNECTIONS,PYTHONPATH,TORCH_NCCL_TRACE_BUFFER_SIZE,NCCL_IB_TIMEOUT,NCCL_SOCKET_TIMEOUT,TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC \
      --container-mount-home \
      bash -c "

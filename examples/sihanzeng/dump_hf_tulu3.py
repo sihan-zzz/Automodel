@@ -1,10 +1,17 @@
-"""Dump first 1000 HF Tulu3 samples to local JSONL for fair comparison."""
+"""Dump HF Tulu3 samples to local JSONL for fair comparison.
+
+Usage:
+  python dump_hf_tulu3.py          # default 5000 samples
+  python dump_hf_tulu3.py 10000    # custom count
+"""
 import json
 import os
+import sys
 from datasets import load_dataset
 
-ds = load_dataset("allenai/tulu-3-sft-mixture", split="train[:1000]")
-out_dir = "/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_1k"
+n = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+ds = load_dataset("allenai/tulu-3-sft-mixture", split=f"train[:{n}]")
+out_dir = f"/mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_{n // 1000}k"
 os.makedirs(out_dir, exist_ok=True)
 out = os.path.join(out_dir, "train.jsonl")
 with open(out, "w") as f:

@@ -44,7 +44,7 @@ loss_fn:
   _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
 dataset:
   _target_: nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset
-  path_or_dataset_id: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_1k/train.jsonl
+  path_or_dataset_id: /mnt/lustre/metavmds0lstre/checkpoints/sihanzeng/data/tulu3_5k/train.jsonl
   split: train
   seq_length: 2048
   padding: do_not_pad
