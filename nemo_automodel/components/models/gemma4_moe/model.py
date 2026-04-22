@@ -570,6 +570,20 @@ class Gemma4MoETextModelBackend(nn.Module):
                 "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
             }
 
+        # For packed sequences, rebuild position_ids to reset per sub-sequence
+        if has_packed_seqlens and isinstance(seq_lens_tensor, torch.Tensor):
+            bsz_p, total_len_p = inputs_embeds.shape[:2]
+            new_pos = torch.zeros(bsz_p, total_len_p, dtype=torch.long, device=inputs_embeds.device)
+            for b in range(bsz_p):
+                slens = seq_lens_tensor[b]
+                slens = slens[slens > 0]
+                offset = 0
+                for sl in slens:
+                    sl = int(sl.item())
+                    new_pos[b, offset:offset + sl] = torch.arange(sl, device=inputs_embeds.device)
+                    offset += sl
+            position_ids = new_pos
+
         # Remove collater metadata keys before passing to decoder layers
         kwargs.pop("seq_lens_padded", None)
         kwargs.pop("qkv_format", None)
